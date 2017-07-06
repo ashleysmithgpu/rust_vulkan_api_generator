@@ -1,0 +1,12 @@
+[package]
+name = "rust_vulkan_api_generator"
+version = "0.0.1"
+authors = ["Ashley Smith <ashleysmithgpu@gmail.com>"]
+description = "Generates a rust FFI interface to Vulkan"
+repository = "https://github.com/ashleysmithgpu/rust_vulkan_api_generator"
+
+keywords = ["vulkan"]
+
+[dependencies]
+quick-xml = "0.8.0"
+regex = "0.2"
