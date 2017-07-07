@@ -51,9 +51,9 @@ fn translate_parameter_name(original_name: String) -> String {
 fn translate_values(original_value: String) -> String {
 	match original_value.as_ref() {
 		"1000.0f" => "1000.0".to_string(),
-		"(~0U)" => "std::usize::MAX".to_string(),
-		"(~0ULL)" => "std::u64::MAX".to_string(),
-		"(~0U-1)" => "std::usize::MAX - 1".to_string(),
+		"(~0U)" => "::std::usize::MAX".to_string(),
+		"(~0ULL)" => "::std::u64::MAX".to_string(),
+		"(~0U-1)" => "::std::usize::MAX - 1".to_string(),
 		_ => original_value.to_string()
 	}
 }
@@ -88,7 +88,8 @@ fn main() {
 		}
 	}
 
-	println!("using xml file {}", xml_filename);
+	println!("Using input xml file \"{}\"", xml_filename);
+	println!("Using output rs file \"{}\"", rs_filename);
 
 	let mut f = std::fs::File::open(xml_filename).expect("Failed to open file");
 	let mut contents = String::new();
@@ -348,14 +349,14 @@ fn main() {
 					b"member" => {
 						if matching_what[0] == "member" {
 							if struct_member_array {
-								struct_members.write_fmt(format_args!("\t{}: [{}{} {}; {}],\n",
+								struct_members.write_fmt(format_args!("\tpub {}: [{}{} {}; {}],\n",
 									struct_member_name,
 									if struct_member_ptr { "*" } else { "" },
 									if struct_member_const { if struct_member_ptr { "const" } else { "" } } else { if struct_member_ptr { "mut" } else { "" } },
 									struct_member_type,
 									struct_member_array_size)).expect("Could not format string");
 							} else {
-								struct_members.write_fmt(format_args!("\t{}: {}{} {},\n",
+								struct_members.write_fmt(format_args!("\tpub {}: {}{} {},\n",
 									struct_member_name,
 									if struct_member_ptr { "*" } else { "" },
 									if struct_member_const { if struct_member_ptr { "const" } else { "" } } else { if struct_member_ptr { "mut" } else { "" } },
@@ -427,22 +428,34 @@ fn main() {
 		});
 
 	// TODO:
-	let fluff = r#"type VkDeviceSize = i64;
-type VkSampleMask = i32;
+	let fluff = r#"
+extern crate libc;
 
-type PFN_vkAllocationFunction = *const c_void;
-type PFN_vkReallocationFunction = *const c_void;
-type PFN_vkFreeFunction = *const c_void;
-type PFN_vkInternalAllocationNotification = *const c_void;
-type PFN_vkInternalFreeNotification = *const c_void;
-type PFN_vkDebugReportCallbackEXT = *const c_void;
-type PFN_vkVoidFunction = *const c_void;
+#[macro_use]
+extern crate bitflags;
 
-struct VkClearColorValue {
+pub mod vkrust {
+
+use libc::{c_int, c_void};
+use std::ptr;
+
+pub type VkDeviceSize = i64;
+pub type VkSampleMask = i32;
+
+pub type PFN_vkAllocationFunction = *const c_void;
+pub type PFN_vkReallocationFunction = *const c_void;
+pub type PFN_vkFreeFunction = *const c_void;
+pub type PFN_vkInternalAllocationNotification = *const c_void;
+pub type PFN_vkInternalFreeNotification = *const c_void;
+pub type PFN_vkDebugReportCallbackEXT = *const c_void;
+pub type PFN_vkVoidFunction = *const c_void;
+
+// TODO: how to do unions in rust?
+pub struct VkClearColorValue {
 	col: f32
 }
 
-struct VkClearValue {
+pub struct VkClearValue {
 	col: VkClearColorValue
 }"#;
 	{
@@ -452,35 +465,35 @@ struct VkClearValue {
 		// Print constants
 		for consts in api_constants {
 			let tmp = &consts.0;
-			write!(output, "const {}: {} = {};\n", consts.0, guess_type_from_name(tmp), translate_values(consts.1)).expect("Failed to write");
+			write!(output, "pub const {}: {} = {};\n", consts.0, guess_type_from_name(tmp), translate_values(consts.1)).expect("Failed to write");
 		}
 
 		// Print typedefs
 		for t in types {
-			write!(output, "type {} = i64;\n", t).expect("Failed to write");
+			write!(output, "pub type {} = i64;\n", t).expect("Failed to write");
 		}
 		for t in bitmask_types {
-			write!(output, "type {} = i32;\n", t).expect("Failed to write");
+			write!(output, "pub type {} = i32;\n", t).expect("Failed to write");
 		}
 		for t in handle_types {
-			write!(output, "type {} = i64;\n", t).expect("Failed to write");
+			write!(output, "pub type {} = i64;\n", t).expect("Failed to write");
 		}
 
 		// Print enums
 		for e in enums {
-			write!(output, "#[repr(i32)]\nenum {} {{\n{}\n", e.0, e.1).expect("Failed to write");
+			write!(output, "#[derive(PartialEq)]\n#[repr(i32)]\npub enum {} {{\n{}\n", e.0, e.1).expect("Failed to write");
 			write!(output, "}}\n\n").expect("Failed to write");
 		}
 
 		// Print bitflags (bitmasks)
 		for b in bitflags {
-			write!(output, "bitflags! {{\n\tstruct {}: u32 {{\n{}\n", b.0, b.1).expect("Failed to write");
+			write!(output, "bitflags! {{\n\tpub struct {}: u32 {{\n{}\n", b.0, b.1).expect("Failed to write");
 			write!(output, "\t}}\n}}\n\n").expect("Failed to write");
 		}
 
 		// Print structs
 		for s in structs {
-			write!(output, "#[repr(C)]\nstruct {} {{\n{}\n}}\n", s.0, s.1).expect("Failed to write");
+			write!(output, "#[repr(C)]\npub struct {} {{\n{}\n}}\n", s.0, s.1).expect("Failed to write");
 		}
 
 		// Print functions
@@ -489,8 +502,9 @@ struct VkClearValue {
 
 		for cmd in commands {
 
-			write!(output, "\tfn {}({}) -> {};\n", cmd.0, cmd.1, cmd.2).expect("Failed to write");
+			write!(output, "\tpub fn {}({}) -> {};\n", cmd.0, cmd.1, cmd.2).expect("Failed to write");
 		}
+		write!(output, "}}\n").expect("Failed to write");
 		write!(output, "}}\n").expect("Failed to write");
 	}
 }
