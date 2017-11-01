@@ -1,10 +1,6 @@
 
 extern crate vkrust;
 
-extern crate libc;
-
-extern crate bitflags;
-
 #[cfg(test)]
 mod tests {
 
@@ -179,6 +175,43 @@ fn destroy_instance(instance: vkrust::VkInstance) {
 
 		assert!(res.is_ok());
 
+		destroy_instance(res.unwrap());
+	}
+
+#[test]
+	fn test_device_two_instances() {
+		let ici = InstanceCreateInfo {
+			flags: 0,
+			application_info: ApplicationInfo {
+				application_name: "test".to_string(),
+				application_version: 1,
+				engine_name: "test_engine".to_string(),
+				engine_version: 0,
+				api_version: 0,
+			},
+			enabled_layers: vec::Vec::new(),
+			enabled_extensions: vec::Vec::new()
+		};
+		let res = create_instance(ici);
+
+		assert!(res.is_ok());
+
+		let ici2 = InstanceCreateInfo {
+			flags: 0,
+			application_info: ApplicationInfo {
+				application_name: "test".to_string(),
+				application_version: 1,
+				engine_name: "test_engine".to_string(),
+				engine_version: 0,
+				api_version: 0,
+			},
+			enabled_layers: vec::Vec::new(),
+			enabled_extensions: vec::Vec::new()
+		};
+		let res2 = create_instance(ici2);
+
+		assert!(res2.is_ok());
+		destroy_instance(res2.unwrap());
 		destroy_instance(res.unwrap());
 	}
 }

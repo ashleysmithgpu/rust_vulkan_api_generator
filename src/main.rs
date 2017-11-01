@@ -1,6 +1,7 @@
 
 extern crate quick_xml;
 extern crate regex;
+extern crate inflector;
 
 use quick_xml::reader::Reader;
 use quick_xml::events::Event;
@@ -8,6 +9,10 @@ use std::fmt::Write;
 use std::str;
 
 use std::io::prelude::*;
+
+use inflector::cases::screamingsnakecase::to_screaming_snake_case;
+
+use regex::Regex;
 
 // c type mappings to rust style
 fn guess_type_from_name(name: &String) -> String {
@@ -31,6 +36,17 @@ fn translate_types(original_type: String) -> String {
 		"float" => "f32".to_string(),
 		"VkBool32" => "bool".to_string(),
 		_ => original_type.to_string()
+	}
+}
+
+fn translate_define(define: (String, String)) -> String {
+
+	// TODO: this is the wrong way to use XML
+	let re = Regex::new("[0-9]+$").unwrap();
+
+	match define.0.as_ref() {
+		"VK_HEADER_VERSION" => format!("\npub const VK_HEADER_VERSION: i32 = {};", re.captures(&define.1).unwrap().get(0).unwrap().as_str()).to_string(),
+		_ => String::new()
 	}
 }
 
@@ -113,6 +129,8 @@ fn main() {
 
 	let mut enum_type_bitmask = false;
 
+	let mut comments = Vec::<String>::new();
+
 	let mut param_name = String::new();
 	let mut param_type = String::new();
 	let mut parameters = "".to_string();
@@ -138,6 +156,8 @@ fn main() {
 	let mut type_category = String::new();
 	let mut type_name = String::new();
 
+	let mut define_type_value = String::new();
+
 
 	// Used when writing output
 	// name, value
@@ -150,6 +170,7 @@ fn main() {
 	let mut types = Vec::<String>::new();
 	let mut bitmask_types = Vec::<String>::new();
 	let mut handle_types = Vec::<String>::new();
+	let mut define_types = Vec::<(String, String)>::new();
 
 	// name, members
 	let mut enums = Vec::<(String, String)>::new();
@@ -292,6 +313,8 @@ fn main() {
 						param_type = translate_types(text);
 					} else if matching_what[1] == "member" {
 						struct_member_type = translate_types(text);
+					} else if matching_what[1] == "types" {
+						define_type_value.push_str(&text);
 					}
 
 				// <member>blah</member>
@@ -328,6 +351,11 @@ fn main() {
 					} else if matching_what[1] == "param" {
 						param_array_size = text.to_string();
 					}
+
+				// <comment>blah</comment>
+				} else if matching_what[0] == "comment" {
+
+					comments.push(text.to_string());
 				}
 			},
 			Ok(Event::End(ref e)) => {
@@ -403,6 +431,9 @@ fn main() {
 								} else if type_category == "struct" && !struct_members.is_empty() {
 									structs.push((struct_name.clone(), struct_members.clone()));
 									struct_members.clear();
+								} else if type_category == "define" {
+									define_types.push((type_name.clone(), define_type_value.clone()));
+									define_type_value.clear();
 								}
 							}
 						}
@@ -428,7 +459,9 @@ fn main() {
 		});
 
 	// TODO:
-	let fluff = r#"
+	let fluff1 = r#"
+#![feature(const_fn)]
+
 extern crate libc;
 
 #[macro_use]
@@ -439,6 +472,29 @@ pub mod vkrust {
 
 use libc::{/*c_int,*/ c_void};
 //use std::ptr;
+
+pub const VK_VERSION_1_0: u32 = 1;
+
+pub const fn VK_MAKE_VERSION(major: u32, minor: u32, patch: u32) -> u32 {
+	((major) << 22) | ((minor) << 12) | (patch)
+}
+
+pub const VK_API_VERSION_1_0: u32 = VK_MAKE_VERSION(1, 0, 0);
+
+pub const fn VK_VERSION_MAJOR(version: u32) -> u32 {
+	version >> 22
+}
+
+pub const fn VK_VERSION_MINOR(version: u32) -> u32 {
+	(version >> 22) & 0x3ff
+}
+
+pub const fn VK_VERSION_PATCH(version: u32) -> u32 {
+	version & 0x3ff
+}
+"#;
+
+	let fluff2 = r#"
 
 #[allow(non_camel_case_types)]
 pub type VkDeviceSize = i64;
@@ -472,7 +528,14 @@ pub struct VkClearValue {
 }"#;
 	{
 		use std::io::Write;
-		write!(output, "{}\n", fluff).expect("Failed to write");
+		write!(output, "/*\n{}\n*/\n", comments[0]).expect("Failed to write");
+		write!(output, "{}\n", fluff1).expect("Failed to write");
+
+		for define in define_types {
+			write!(output, "{}", translate_define(define)).expect("Failed to write");
+		}
+
+		write!(output, "{}\n", fluff2).expect("Failed to write");
 
 		// Print constants
 		for consts in api_constants {
@@ -493,8 +556,8 @@ pub struct VkClearValue {
 
 		// Print enums
 		for e in enums {
-			write!(output, "#[allow(non_camel_case_types)]\n#[derive(PartialEq, Debug)]\n#[repr(C)]\npub enum {} {{\n{}\n", e.0, e.1).expect("Failed to write");
-			write!(output, "}}\n\n").expect("Failed to write");
+			write!(output, "#[allow(non_camel_case_types)]\n#[derive(PartialEq, Debug)]\n#[repr(C)]\npub enum {} {{\n{}", e.0, e.1).expect("Failed to write");
+			write!(output, "\t{}_MAX_ENUM = 0x7FFFFFFF\n}}\n\n", to_screaming_snake_case(&e.0)).expect("Failed to write");
 		}
 
 		// Print bitflags (bitmasks)
