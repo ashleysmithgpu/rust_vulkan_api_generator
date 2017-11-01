@@ -435,26 +435,38 @@ extern crate libc;
 extern crate bitflags;
 
 pub mod vkrust {
+#![allow(non_snake_case)]
 
-use libc::{c_int, c_void};
-use std::ptr;
+use libc::{/*c_int,*/ c_void};
+//use std::ptr;
 
+#[allow(non_camel_case_types)]
 pub type VkDeviceSize = i64;
+#[allow(non_camel_case_types)]
 pub type VkSampleMask = i32;
 
+#[allow(non_camel_case_types)]
 pub type PFN_vkAllocationFunction = *const c_void;
+#[allow(non_camel_case_types)]
 pub type PFN_vkReallocationFunction = *const c_void;
+#[allow(non_camel_case_types)]
 pub type PFN_vkFreeFunction = *const c_void;
+#[allow(non_camel_case_types)]
 pub type PFN_vkInternalAllocationNotification = *const c_void;
+#[allow(non_camel_case_types)]
 pub type PFN_vkInternalFreeNotification = *const c_void;
+#[allow(non_camel_case_types)]
 pub type PFN_vkDebugReportCallbackEXT = *const c_void;
+#[allow(non_camel_case_types)]
 pub type PFN_vkVoidFunction = *const c_void;
 
 // TODO: how to do unions in rust?
+#[repr(C)]
 pub struct VkClearColorValue {
 	col: f32
 }
 
+#[repr(C)]
 pub struct VkClearValue {
 	col: VkClearColorValue
 }"#;
@@ -470,24 +482,24 @@ pub struct VkClearValue {
 
 		// Print typedefs
 		for t in types {
-			write!(output, "pub type {} = i64;\n", t).expect("Failed to write");
+			write!(output, "#[allow(non_camel_case_types)]\npub type {} = i64;\n", t).expect("Failed to write");
 		}
 		for t in bitmask_types {
-			write!(output, "pub type {} = i32;\n", t).expect("Failed to write");
+			write!(output, "#[allow(non_camel_case_types)]\npub type {} = i32;\n", t).expect("Failed to write");
 		}
 		for t in handle_types {
-			write!(output, "pub type {} = i64;\n", t).expect("Failed to write");
+			write!(output, "#[allow(non_camel_case_types)]\npub type {} = i64;\n", t).expect("Failed to write");
 		}
 
 		// Print enums
 		for e in enums {
-			write!(output, "#[derive(PartialEq, Debug)]\n#[repr(i32)]\npub enum {} {{\n{}\n", e.0, e.1).expect("Failed to write");
+			write!(output, "#[allow(non_camel_case_types)]\n#[derive(PartialEq, Debug)]\n#[repr(C)]\npub enum {} {{\n{}\n", e.0, e.1).expect("Failed to write");
 			write!(output, "}}\n\n").expect("Failed to write");
 		}
 
 		// Print bitflags (bitmasks)
 		for b in bitflags {
-			write!(output, "bitflags! {{\n\tpub struct {}: u32 {{\n{}\n", b.0, b.1).expect("Failed to write");
+			write!(output, "bitflags! {{\n#[repr(C)]\n\tpub struct {}: u32 {{\n{}\n", b.0, b.1).expect("Failed to write");
 			write!(output, "\t}}\n}}\n\n").expect("Failed to write");
 		}
 

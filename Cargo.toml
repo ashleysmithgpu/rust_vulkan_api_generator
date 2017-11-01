@@ -14,6 +14,8 @@ regex = "0.2"
 libc = "0.2.24"
 bitflags = "0.9.1"
 
+# TODO: need to build the bin target first, cargo does not support this
+
 [[bin]]
 name = "rust_vulkan_api_generator"
 path = "src/main.rs"
@@ -21,6 +23,9 @@ path = "src/main.rs"
 [lib]
 name = "vkrust"
 path = "src/lib.rs"
+
+# TODO: need to run the generator before the lib target builds, cargo does not support this
+#build = "build.rs"
 
 [[test]]
 path = "tests/device.rs"
