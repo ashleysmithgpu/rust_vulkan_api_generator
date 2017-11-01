@@ -481,7 +481,7 @@ pub struct VkClearValue {
 
 		// Print enums
 		for e in enums {
-			write!(output, "#[derive(PartialEq)]\n#[repr(i32)]\npub enum {} {{\n{}\n", e.0, e.1).expect("Failed to write");
+			write!(output, "#[derive(PartialEq, Debug)]\n#[repr(i32)]\npub enum {} {{\n{}\n", e.0, e.1).expect("Failed to write");
 			write!(output, "}}\n\n").expect("Failed to write");
 		}
 

@@ -4,9 +4,24 @@ version = "0.0.1"
 authors = ["Ashley Smith <ashleysmithgpu@gmail.com>"]
 description = "Generates a rust FFI interface to Vulkan"
 repository = "https://github.com/ashleysmithgpu/rust_vulkan_api_generator"
-
 keywords = ["vulkan"]
 
 [dependencies]
 quick-xml = "0.8.0"
 regex = "0.2"
+
+# TODO: when cargo supports setting depenencies per target, move these to lib only
+libc = "0.2.24"
+bitflags = "0.9.1"
+
+[[bin]]
+name = "rust_vulkan_api_generator"
+path = "src/main.rs"
+
+[lib]
+name = "vkrust"
+path = "src/lib.rs"
+
+[[test]]
+path = "tests/device.rs"
+name = "device"
