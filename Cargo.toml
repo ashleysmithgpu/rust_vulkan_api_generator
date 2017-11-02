@@ -6,6 +6,9 @@ description = "Generates a rust FFI interface to Vulkan"
 repository = "https://github.com/ashleysmithgpu/rust_vulkan_api_generator"
 keywords = ["vulkan"]
 
+[features]
+default = ["xcb"]
+
 [dependencies]
 quick-xml = "0.8.0"
 regex = "0.2"
@@ -14,6 +17,8 @@ Inflector = "0.10.1"
 # TODO: when cargo supports setting depenencies per target, move these to lib only
 libc = "0.2.24"
 bitflags = "0.9.1"
+
+xcb = { version = "0.8", optional = true }
 
 # TODO: need to build the bin target first, cargo does not support this
 

@@ -61,3 +61,18 @@ fn main() {
 ## Note
 
 This is my attempt to learn rust... You probably don't want to use this code yet :)
+
+## Interesting stuff
+
+I'm really liking rust, imagine the bugs that this eliminates:
+```rust
+pub enum VkStructureType {
+	STANDARD_ENUM_VALUES=0,
+	//...
+#[cfg(feature="xcb")]
+	XCB_SPECIFIC_ENUM_VALUE=123
+}
+```
+Rust disallows enum values not present by default so we can only pass valid values to whatever takes a VkStructureType.
+Match (switch) statements that don't handle all values (cases) are known at compile time.
+

@@ -131,6 +131,38 @@ fn destroy_instance(instance: vkrust::VkInstance) {
 		}
 	}
 
+// TODO: no way to use i.e. should_fail since we segfault here
+/*
+#[test]
+#[should_fail]
+	fn test_device_bad_layers_segfault() {
+
+		let res: vkrust::VkResult;
+		let mut instance: vkrust::VkInstance = 0;
+		let application_info = vkrust::VkApplicationInfo {
+			sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_APPLICATION_INFO,
+			pNext: ptr::null(),
+			pApplicationName: "app name".as_ptr(),
+			applicationVersion: vkrust::VK_MAKE_VERSION(1,0,0),
+			pEngineName: "engine name".as_ptr(),
+			engineVersion: vkrust::VK_MAKE_VERSION(1,0,0),
+			apiVersion: vkrust::VK_MAKE_VERSION(1,0,0),
+		};
+		let create_info = vkrust::VkInstanceCreateInfo {
+			sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: 0,
+			pApplicationInfo: &application_info,
+			enabledLayerCount: 100,
+			ppEnabledLayerNames: ptr::null(),
+			enabledExtensionCount: 0,
+			ppEnabledExtensionNames: ptr::null(),
+		};
+		unsafe {
+			res = vkrust::vkCreateInstance(&create_info, ptr::null(), &mut instance);
+		};
+	}*/
+
 #[test]
 	fn test_device_bad_version() {
 		// Bad api version

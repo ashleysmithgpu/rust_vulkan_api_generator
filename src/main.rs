@@ -9,6 +9,7 @@ use std::fmt::Write;
 use std::str;
 
 use std::io::prelude::*;
+use std::collections::HashMap;
 
 use inflector::cases::screamingsnakecase::to_screaming_snake_case;
 
@@ -46,6 +47,7 @@ fn translate_define(define: (String, String)) -> String {
 
 	match define.0.as_ref() {
 		"VK_HEADER_VERSION" => format!("\npub const VK_HEADER_VERSION: i32 = {};", re.captures(&define.1).unwrap().get(0).unwrap().as_str()).to_string(),
+		"VK_NULL_HANDLE" => "\npub const VK_NULL_HANDLE: u64 = 0;".to_string(),
 		_ => String::new()
 	}
 }
@@ -164,7 +166,7 @@ fn main() {
 	let mut api_constants = Vec::<(String, String)>::new();
 
 	// name, parameters, return type
-	let mut commands = Vec::<(String, String, String)>::new();
+	let mut commands = HashMap::new();//Vec::<(String, String, String)>::new();
 
 	// name
 	let mut types = Vec::<String>::new();
@@ -180,6 +182,19 @@ fn main() {
 
 	// name, members
 	let mut structs = Vec::<(String, String)>::new();
+
+	enum FeatureContent {
+		Command(String),
+		Type(String),
+		Enum(String)
+	}
+
+	struct FeatureBlock {
+		comment: String,
+		contents: Vec<FeatureContent>
+	}
+
+	let mut features = Vec::<FeatureBlock>::new();
 
 	// Loop over each xml element
 	loop {
@@ -229,6 +244,18 @@ fn main() {
 							}
 						}
 					},
+					b"require" => {
+						if matching_what[0] == "feature" {
+							let mut comment = "";
+							for att in e.attributes() {
+								let tmp = att.unwrap();
+								if str::from_utf8(tmp.key).unwrap() == "comment" { comment = str::from_utf8(tmp.value).unwrap(); }
+							}
+							features.push(FeatureBlock{
+								comment: comment.to_string(), contents: vec![]
+							});
+						}
+					}
 					_ => (),
 				}
 				let s = str::from_utf8(e.name()).unwrap();
@@ -269,6 +296,13 @@ fn main() {
 									enum_members.write_fmt(format_args!("\t{} = {},\n", name, value)).expect("Could not format string");
 								}
 							}
+						} else if matching_what[0] == "require" && matching_what[1] == "feature" {
+							let mut name = "";
+							for att in e.attributes() {
+								let tmp = att.unwrap();
+								if str::from_utf8(tmp.key).unwrap() == "name" { name = str::from_utf8(tmp.value).unwrap(); }
+							}
+							features.last_mut().unwrap().contents.push(FeatureContent::Enum(name.to_string()));
 						}
 					},
 					b"type" => {
@@ -283,6 +317,23 @@ fn main() {
 							if !requires.is_empty() {
 								types.push(name.to_string());
 							}
+						} else if matching_what[0] == "require" && matching_what[1] == "feature" {
+							let mut name = "";
+							for att in e.attributes() {
+								let tmp = att.unwrap();
+								if str::from_utf8(tmp.key).unwrap() == "name" { name = str::from_utf8(tmp.value).unwrap(); }
+							}
+							features.last_mut().unwrap().contents.push(FeatureContent::Type(name.to_string()));
+						}
+					},
+					b"command" => {
+						if matching_what[0] == "require" && matching_what[1] == "feature" {
+							let mut name = "";
+							for att in e.attributes() {
+								let tmp = att.unwrap();
+								if str::from_utf8(tmp.key).unwrap() == "name" { name = str::from_utf8(tmp.value).unwrap(); }
+							}
+							features.last_mut().unwrap().contents.push(FeatureContent::Command(name.to_string()));
 						}
 					},
 					_ => (),
@@ -394,7 +445,7 @@ fn main() {
 					},
 					b"command" => {
 						if matching_what[0] == "command" {
-							commands.push((function_name.clone(), parameters.clone(), return_value.clone()));
+							commands.insert(function_name.clone(), (parameters.clone(), return_value.clone()));
 							parameters.clear();
 						}
 					},
@@ -528,6 +579,12 @@ pub struct VkClearValue {
 }"#;
 	{
 		use std::io::Write;
+
+
+
+
+
+
 		write!(output, "/*\n{}\n*/\n", comments[0]).expect("Failed to write");
 		write!(output, "{}\n", fluff1).expect("Failed to write");
 
@@ -545,13 +602,13 @@ pub struct VkClearValue {
 
 		// Print typedefs
 		for t in types {
-			write!(output, "#[allow(non_camel_case_types)]\npub type {} = i64;\n", t).expect("Failed to write");
+			write!(output, "#[allow(non_camel_case_types)]\npub type {} = u64;\n", t).expect("Failed to write");
 		}
 		for t in bitmask_types {
-			write!(output, "#[allow(non_camel_case_types)]\npub type {} = i32;\n", t).expect("Failed to write");
+			write!(output, "#[allow(non_camel_case_types)]\npub type {} = u32;\n", t).expect("Failed to write");
 		}
 		for t in handle_types {
-			write!(output, "#[allow(non_camel_case_types)]\npub type {} = i64;\n", t).expect("Failed to write");
+			write!(output, "#[allow(non_camel_case_types)]\npub type {} = u64;\n", t).expect("Failed to write");
 		}
 
 		// Print enums
@@ -575,10 +632,25 @@ pub struct VkClearValue {
 		write!(output, "#[link(name = \"vulkan\")]\n").expect("Failed to write");
 		write!(output, "extern {{\n").expect("Failed to write");
 
-		for cmd in commands {
+		for feature_block in features {
 
-			write!(output, "\tpub fn {}({}) -> {};\n", cmd.0, cmd.1, cmd.2).expect("Failed to write");
+			write!(output, "\t// {}\n", feature_block.comment).expect("Failed to write");
+
+			for feature_content in feature_block.contents {
+
+				match feature_content {
+					FeatureContent::Command(name) => {
+
+						match commands.get(&name) {
+							Some(ref cmd) => write!(output, "\tpub fn {}({}) -> {};\n", name, cmd.0, cmd.1).expect("Failed to write"),
+							_ => ()
+						}
+					},
+					_ => ()
+				}
+			}
 		}
+
 		write!(output, "}}\n").expect("Failed to write");
 		write!(output, "}}\n").expect("Failed to write");
 	}
