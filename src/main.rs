@@ -175,7 +175,12 @@ fn main() {
 	let mut define_types = Vec::<(String, String)>::new();
 
 	// name, members
-	let mut enums = Vec::<(String, String)>::new();
+	struct Enum {
+		name: String,
+		values: Vec<(String, i32)>
+	}
+
+	let mut enums = Vec::<Enum>::new();
 
 	// name, members
 	let mut bitflags = Vec::<(String, String)>::new();
@@ -183,6 +188,7 @@ fn main() {
 	// name, members
 	let mut structs = Vec::<(String, String)>::new();
 
+	// Features
 	enum FeatureContent {
 		Command(String),
 		Type(String),
@@ -196,26 +202,59 @@ fn main() {
 
 	let mut features = Vec::<FeatureBlock>::new();
 
+	// Extensions
+	enum ExtensionNewType {
+		EnumExtension { name: String, offset: u32, extends: String, comment: String, dir: String },
+		Command(String),
+		Type(String)
+	}
+
+	struct Extension {
+		name: String,
+		number: u32,
+		extension_type: String,
+		author: String,
+		contact: String,
+		supported: String,
+		types: Vec<ExtensionNewType>
+	}
+
+	let mut extensions = Vec::<Extension>::new();
+
+
+	let mut attributes: HashMap<String, String> = HashMap::new();
+
 	// Loop over each xml element
 	loop {
 		match reader.read_event(&mut buf) {
 			Ok(Event::Start(ref e)) => {
+
+				attributes.clear();
+				for att in e.attributes() {
+					let tmp = att.unwrap();
+					attributes.insert(str::from_utf8(tmp.key).unwrap().to_string(), str::from_utf8(tmp.value).unwrap().to_string());
+				}
+
 				match e.name() {
 					b"enums" => {
 						if matching_what[0] == "registry" {
-							let mut name = "";
 							let mut etype = "";
-							for att in e.attributes() {
-								let tmp = att.unwrap();
-								if str::from_utf8(tmp.key).unwrap() == "name" { name = str::from_utf8(tmp.value).unwrap(); }
-								if str::from_utf8(tmp.key).unwrap() == "type" { etype = str::from_utf8(tmp.value).unwrap(); }
+							if let Some(etypes) = attributes.get("type") {
+								etype = etypes;
 							}
-							enum_name = name.to_string();
+							if let Some(name) = attributes.get("name") {
+								enum_name = name.to_string();
+							}
 							if etype == "enum" {
 								enum_type_bitmask = false;
+								enums.push(Enum{
+									name: enum_name.clone(),
+									values: vec![]
+								});
+
 							} else if etype == "bitmask" {
 								enum_type_bitmask = true;
-							} else if name == "API Constants" {
+							} else if enum_name == "API Constants" {
 								matching_api_constants = true
 							}
 						}
@@ -230,30 +269,40 @@ fn main() {
 					},
 					b"type" => {
 						if matching_what[0] == "types" {
-							let mut name = "";
-							let mut category = "";
-							for att in e.attributes() {
-								let tmp = att.unwrap();
-								if str::from_utf8(tmp.key).unwrap() == "name" { name = str::from_utf8(tmp.value).unwrap(); }
-								if str::from_utf8(tmp.key).unwrap() == "category" { category = str::from_utf8(tmp.value).unwrap(); }
+							if let Some(category) = attributes.get("category") {
+								type_category = category.to_string();
 							}
-							type_category = category.to_string();
 
-							if category == "struct" {
-								struct_name = name.to_string();
+							if type_category == "struct" {
+								if let Some(name) = attributes.get("name") {
+									struct_name = name.to_string();
+								}
 							}
 						}
 					},
 					b"require" => {
 						if matching_what[0] == "feature" {
-							let mut comment = "";
-							for att in e.attributes() {
-								let tmp = att.unwrap();
-								if str::from_utf8(tmp.key).unwrap() == "comment" { comment = str::from_utf8(tmp.value).unwrap(); }
+							if let Some(comment) = attributes.get("comment") {
+								features.push(FeatureBlock{
+									comment: comment.to_string(), contents: vec![]
+								});
 							}
-							features.push(FeatureBlock{
-								comment: comment.to_string(), contents: vec![]
-							});
+						}
+					},
+					b"extension" => {
+						if matching_what[0] == "extensions" {
+							if let (Some(name), Some(number), Some(supported)) = (attributes.get("name"), attributes.get("number"), attributes.get("supported")) {
+
+								extensions.push(Extension{
+									name: name.to_string(),
+									number: number.parse::<u32>().unwrap(),
+									extension_type: if let Some(extension_type) = attributes.get("type") { extension_type.to_string() } else { "".to_string() },
+									author: if let Some(author) = attributes.get("author") { author.to_string() } else { "".to_string() },
+									contact: if let Some(contact) = attributes.get("contact") { contact.to_string() } else { "".to_string() },
+									supported: supported.to_string(),
+									types: vec![]
+								});
+							}
 						}
 					}
 					_ => (),
@@ -262,20 +311,21 @@ fn main() {
 				matching_what.push_front(s.to_string());
 			},
 			Ok(Event::Empty(ref e)) => {
+
+				attributes.clear();
+				for att in e.attributes() {
+					let tmp = att.unwrap();
+					attributes.insert(str::from_utf8(tmp.key).unwrap().to_string(), str::from_utf8(tmp.value).unwrap().to_string());
+				}
+
 				match e.name() {
 					b"enum" => {
 						if matching_what[0] == "enums" {
-							let mut name = "";
-							let mut value = "";
-							let mut bitpos = "";
-							for att in e.attributes() {
-								let tmp = att.unwrap();
-								if str::from_utf8(tmp.key).unwrap() == "name" { name = str::from_utf8(tmp.value).unwrap(); }
-								if str::from_utf8(tmp.key).unwrap() == "value" { value = str::from_utf8(tmp.value).unwrap(); }
-								if str::from_utf8(tmp.key).unwrap() == "bitpos" { bitpos = str::from_utf8(tmp.value).unwrap(); }
-							}
+							let name = if let Some(name) = attributes.get("name") { name.to_string() } else { "".to_string() };
+							let value = if let Some(value) = attributes.get("value") { value.to_string() } else { "".to_string() };
+							let bitpos = if let Some(bitpos) = attributes.get("bitpos") { bitpos.to_string() } else { "".to_string() };
 							if matching_api_constants {
-								api_constants.push((name.to_string(), value.to_string()));
+								api_constants.push((name, value));
 							} else {
 								if enum_type_bitmask {
 									if !bitpos.is_empty() {
@@ -293,16 +343,33 @@ fn main() {
 										enum_members.write_fmt(format_args!("\t\tconst {} = {};\n", name, value)).expect("Could not format string");
 									}
 								} else {
-									enum_members.write_fmt(format_args!("\t{} = {},\n", name, value)).expect("Could not format string");
+									//enum_members.write_fmt(format_args!("\t{} = {},\n", name, value)).expect("Could not format string");
+									enums.last_mut().unwrap().values.push((name, value.parse::<i32>().unwrap()));
 								}
 							}
 						} else if matching_what[0] == "require" && matching_what[1] == "feature" {
-							let mut name = "";
-							for att in e.attributes() {
-								let tmp = att.unwrap();
-								if str::from_utf8(tmp.key).unwrap() == "name" { name = str::from_utf8(tmp.value).unwrap(); }
-							}
+							let name = if let Some(name) = attributes.get("name") { name.to_string() } else { "".to_string() };
 							features.last_mut().unwrap().contents.push(FeatureContent::Enum(name.to_string()));
+						} else if matching_what[0] == "require" && matching_what[1] == "extension" {
+							let name = if let Some(name) = attributes.get("name") { name.to_string() } else { "".to_string() };
+							let extends = if let Some(extends) = attributes.get("extends") { extends.to_string() } else { "".to_string() };
+
+							// Extends a bitflags structure
+							if let Some(bitpos) = attributes.get("bitpos") {
+								// TODO
+
+							// Extends an enum
+							} else if let Some(offset) = attributes.get("offset") {
+								let comment = if let Some(comment) = attributes.get("comment") { comment.to_string() } else { "".to_string() };
+								let dir = if let Some(dir) = attributes.get("dir") { dir.to_string() } else { "".to_string() };
+								extensions.last_mut().unwrap().types.push(ExtensionNewType::EnumExtension{
+									name: name.to_string(),
+									offset: offset.to_string().parse::<u32>().unwrap(),
+									extends: extends,
+									comment: comment,
+									dir: dir,
+								});
+							}
 						}
 					},
 					b"type" => {
@@ -318,22 +385,19 @@ fn main() {
 								types.push(name.to_string());
 							}
 						} else if matching_what[0] == "require" && matching_what[1] == "feature" {
-							let mut name = "";
-							for att in e.attributes() {
-								let tmp = att.unwrap();
-								if str::from_utf8(tmp.key).unwrap() == "name" { name = str::from_utf8(tmp.value).unwrap(); }
-							}
+							let name = if let Some(name) = attributes.get("name") { name.to_string() } else { "".to_string() };
 							features.last_mut().unwrap().contents.push(FeatureContent::Type(name.to_string()));
 						}
 					},
 					b"command" => {
 						if matching_what[0] == "require" && matching_what[1] == "feature" {
-							let mut name = "";
-							for att in e.attributes() {
-								let tmp = att.unwrap();
-								if str::from_utf8(tmp.key).unwrap() == "name" { name = str::from_utf8(tmp.value).unwrap(); }
-							}
+							let name = if let Some(name) = attributes.get("name") { name.to_string() } else { "".to_string() };
 							features.last_mut().unwrap().contents.push(FeatureContent::Command(name.to_string()));
+						} else if matching_what[0] == "require" && matching_what[1] == "extension" {
+
+							if let Some(name) = attributes.get("name") {
+								extensions.last_mut().unwrap().types.push(ExtensionNewType::Command(name.to_string()));
+							}
 						}
 					},
 					_ => (),
@@ -419,7 +483,7 @@ fn main() {
 								if enum_type_bitmask {
 									bitflags.push((enum_name.clone(), enum_members.clone()));
 								} else {
-									enums.push((enum_name.clone(), enum_members.clone()));
+									//enums.push((enum_name.clone(), enum_members.clone()));
 								}
 								enum_members.clear();
 							}
@@ -611,10 +675,42 @@ pub struct VkClearValue {
 			write!(output, "#[allow(non_camel_case_types)]\npub type {} = u64;\n", t).expect("Failed to write");
 		}
 
+		// See https://github.com/KhronosGroup/Vulkan-LoaderAndValidationLayers/blob/master/scripts/generator.py
+		let extension_base_number = 1000000000;
+		let extension_block_size = 1000;
+
 		// Print enums
 		for e in enums {
-			write!(output, "#[allow(non_camel_case_types)]\n#[derive(PartialEq, Debug)]\n#[repr(C)]\npub enum {} {{\n{}", e.0, e.1).expect("Failed to write");
-			write!(output, "\t{}_MAX_ENUM = 0x7FFFFFFF\n}}\n\n", to_screaming_snake_case(&e.0)).expect("Failed to write");
+			write!(output, "#[allow(non_camel_case_types)]\n#[derive(PartialEq, Debug)]\n#[repr(C)]\npub enum {} {{\n", &e.name).expect("Failed to write");
+			for v in e.values {
+				write!(output, "\t{} = {},\n", v.0, v.1).expect("Failed to write");
+			}
+
+			// TODO: probably should use a hash map here
+			for ext in &extensions {
+
+				if ext.supported != "disabled" {
+
+					let mut once = true;
+					for ext_enum in &ext.types {
+
+						match *ext_enum {
+							ExtensionNewType::EnumExtension { ref name, ref offset, ref extends, ref comment, ref dir } => {
+								if *extends == e.name {
+									if once {
+										write!(output, "\n\t// {}\n", ext.name).expect("Failed to write");
+										once = false;
+									}
+									write!(output, "\t{} = {}{},\n", name, dir, extension_base_number + (ext.number - 1) * extension_block_size + offset).expect("Failed to write");
+								}
+							},
+							_ => ()
+						}
+					}
+				}
+			}
+
+			write!(output, "\t{}_MAX_ENUM = 0x7FFFFFFF\n}}\n\n", to_screaming_snake_case(&e.name)).expect("Failed to write");
 		}
 
 		// Print bitflags (bitmasks)
@@ -634,19 +730,46 @@ pub struct VkClearValue {
 
 		for feature_block in features {
 
-			write!(output, "\t// {}\n", feature_block.comment).expect("Failed to write");
-
+			let mut once = true;
 			for feature_content in feature_block.contents {
 
 				match feature_content {
 					FeatureContent::Command(name) => {
-
-						match commands.get(&name) {
-							Some(ref cmd) => write!(output, "\tpub fn {}({}) -> {};\n", name, cmd.0, cmd.1).expect("Failed to write"),
-							_ => ()
+						if let Some(cmd) = commands.get(&name) {
+							if once {
+								write!(output, "\n\t// {}\n", feature_block.comment).expect("Failed to write");
+								once = false;
+							}
+							write!(output, "\tpub fn {}({}) -> {};\n", name, cmd.0, cmd.1).expect("Failed to write");
 						}
 					},
 					_ => ()
+				}
+			}
+		}
+
+		// Print extension functions
+		write!(output, "\n\t// Extensions\n\n").expect("Failed to write");
+
+		for ext in &extensions {
+
+			if ext.supported != "disabled" {
+
+				let mut once = true;
+				for ext_cmd in &ext.types {
+
+					match *ext_cmd {
+						ExtensionNewType::Command(ref name) => {
+							if let Some(cmd) = commands.get(name) {
+								if once {
+									write!(output, "\n\t// {}\n", ext.name).expect("Failed to write");
+									once = false;
+								}
+								write!(output, "\tpub fn {}({}) -> {};\n", name, cmd.0, cmd.1).expect("Failed to write");
+							}
+						},
+						_ => ()
+					}
 				}
 			}
 		}
