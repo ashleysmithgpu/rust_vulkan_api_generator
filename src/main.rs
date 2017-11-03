@@ -151,7 +151,6 @@ fn main() {
 	let mut struct_member_array_size = String::new();
 
 	let mut enum_name = String::new();
-	let mut enum_members = String::new();
 
 	let mut matching_api_constants = false;
 
@@ -166,7 +165,7 @@ fn main() {
 	let mut api_constants = Vec::<(String, String)>::new();
 
 	// name, parameters, return type
-	let mut commands = HashMap::new();//Vec::<(String, String, String)>::new();
+	let mut commands = HashMap::new();
 
 	// name
 	let mut types = Vec::<String>::new();
@@ -174,16 +173,22 @@ fn main() {
 	let mut handle_types = Vec::<String>::new();
 	let mut define_types = Vec::<(String, String)>::new();
 
-	// name, members
+	// Enums
 	struct Enum {
 		name: String,
 		values: Vec<(String, i32)>
 	}
-
 	let mut enums = Vec::<Enum>::new();
 
-	// name, members
-	let mut bitflags = Vec::<(String, String)>::new();
+	enum BitflagsValueType {
+		Bitpos(u32),
+		Value(String)
+	}
+	struct Bitflags {
+		name: String,
+		values: Vec<(String, BitflagsValueType)>
+	}
+	let mut bitflags = Vec::<Bitflags>::new();
 
 	// name, members
 	let mut structs = Vec::<(String, String)>::new();
@@ -205,6 +210,7 @@ fn main() {
 	// Extensions
 	enum ExtensionNewType {
 		EnumExtension { name: String, offset: u32, extends: String, comment: String, dir: String },
+		BitflagsExtension { name: String, bitpos: u32, extends: String, comment: String },
 		Command(String),
 		Type(String)
 	}
@@ -254,6 +260,11 @@ fn main() {
 
 							} else if etype == "bitmask" {
 								enum_type_bitmask = true;
+								bitflags.push(Bitflags{
+									name: enum_name.clone(),
+									values: vec![]
+								});
+
 							} else if enum_name == "API Constants" {
 								matching_api_constants = true
 							}
@@ -329,21 +340,11 @@ fn main() {
 							} else {
 								if enum_type_bitmask {
 									if !bitpos.is_empty() {
-										let ibitpos = bitpos.parse::<i32>().unwrap();
-										enum_members.write_fmt(format_args!("\t\tconst {} = 0b", name)).expect("Could not format string");
-										for x in (0..32).rev() {
-											if x == ibitpos {
-												enum_members.write_fmt(format_args!("1")).expect("Could not format string");
-											} else {
-												enum_members.write_fmt(format_args!("0")).expect("Could not format string");
-											}
-										}
-										enum_members.write_fmt(format_args!(";\n")).expect("Could not format string");
+										bitflags.last_mut().unwrap().values.push((name, BitflagsValueType::Bitpos(bitpos.parse::<u32>().unwrap())));
 									} else {
-										enum_members.write_fmt(format_args!("\t\tconst {} = {};\n", name, value)).expect("Could not format string");
+										bitflags.last_mut().unwrap().values.push((name, BitflagsValueType::Value(value)));
 									}
 								} else {
-									//enum_members.write_fmt(format_args!("\t{} = {},\n", name, value)).expect("Could not format string");
 									enums.last_mut().unwrap().values.push((name, value.parse::<i32>().unwrap()));
 								}
 							}
@@ -353,14 +354,18 @@ fn main() {
 						} else if matching_what[0] == "require" && matching_what[1] == "extension" {
 							let name = if let Some(name) = attributes.get("name") { name.to_string() } else { "".to_string() };
 							let extends = if let Some(extends) = attributes.get("extends") { extends.to_string() } else { "".to_string() };
+							let comment = if let Some(comment) = attributes.get("comment") { comment.to_string() } else { "".to_string() };
 
 							// Extends a bitflags structure
 							if let Some(bitpos) = attributes.get("bitpos") {
-								// TODO
-
+								extensions.last_mut().unwrap().types.push(ExtensionNewType::BitflagsExtension{
+									name: name.to_string(),
+									bitpos: bitpos.to_string().parse::<u32>().unwrap(),
+									extends: extends,
+									comment: comment,
+								});
 							// Extends an enum
 							} else if let Some(offset) = attributes.get("offset") {
-								let comment = if let Some(comment) = attributes.get("comment") { comment.to_string() } else { "".to_string() };
 								let dir = if let Some(dir) = attributes.get("dir") { dir.to_string() } else { "".to_string() };
 								extensions.last_mut().unwrap().types.push(ExtensionNewType::EnumExtension{
 									name: name.to_string(),
@@ -374,14 +379,8 @@ fn main() {
 					},
 					b"type" => {
 						if matching_what[0] == "types" {
-							let mut name = "";
-							let mut requires = "";
-							for att in e.attributes() {
-								let tmp = att.unwrap();
-								if str::from_utf8(tmp.key).unwrap() == "name" { name = str::from_utf8(tmp.value).unwrap(); }
-								if str::from_utf8(tmp.key).unwrap() == "requires" { requires = str::from_utf8(tmp.value).unwrap(); }
-							}
-							if !requires.is_empty() {
+							let name = if let Some(name) = attributes.get("name") { name.to_string() } else { "".to_string() };
+							if let Some(requires) = attributes.get("requires") {
 								types.push(name.to_string());
 							}
 						} else if matching_what[0] == "require" && matching_what[1] == "feature" {
@@ -478,15 +477,6 @@ fn main() {
 					b"enums" => {
 						if matching_api_constants {
 							matching_api_constants = false;
-						} else {
-							if !enum_members.is_empty() {
-								if enum_type_bitmask {
-									bitflags.push((enum_name.clone(), enum_members.clone()));
-								} else {
-									//enums.push((enum_name.clone(), enum_members.clone()));
-								}
-								enum_members.clear();
-							}
 						}
 					},
 					b"member" => {
@@ -715,8 +705,32 @@ pub struct VkClearValue {
 
 		// Print bitflags (bitmasks)
 		for b in bitflags {
-			write!(output, "bitflags! {{\n#[repr(C)]\n\tpub struct {}: u32 {{\n{}\n", b.0, b.1).expect("Failed to write");
-			write!(output, "\t}}\n}}\n\n").expect("Failed to write");
+
+			if b.values.len() > 0 {
+				write!(output, "bitflags! {{\n#[repr(C)]\n\tpub struct {}: u32 {{\n", b.name).expect("Failed to write");
+
+				for v in b.values {
+
+					match v.1 {
+
+						BitflagsValueType::Bitpos(bitpos) => {
+							write!(output, "\t\tconst {} = 0b", v.0).expect("Could not format string");
+							for x in (0..32).rev() {
+								if x == bitpos {
+									write!(output, "1").expect("Could not format string");
+								} else {
+									write!(output, "0").expect("Could not format string");
+								}
+							}
+							write!(output, ";\n").expect("Could not format string");
+						},
+						BitflagsValueType::Value(value) => {
+							write!(output, "\t\tconst {} = {};\n", v.0, value).expect("Could not format string");
+						}
+					}
+				}
+				write!(output, "\t}}\n}}\n\n").expect("Failed to write");
+			}
 		}
 
 		// Print structs

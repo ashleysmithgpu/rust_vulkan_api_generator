@@ -8,7 +8,8 @@ Binary to convert the vulkan vk.xml file to an API usable in rust.
 
 I.e.
 ```bash
-./rust_vulkan_api_generator path_to/vk.xml -o src/lib.rs
+wget https://raw.githubusercontent.com/KhronosGroup/Vulkan-LoaderAndValidationLayers/master/scripts/vk.xml
+./rust_vulkan_api_generator vk.xml -o src/lib.rs
 ```
 
 Unsafe library to use vulkan in rust.
