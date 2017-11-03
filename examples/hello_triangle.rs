@@ -7,7 +7,7 @@ extern crate xcb;
 use std::ptr;
 
 #[cfg(feature="xcb")]
-fn create_xcb() {
+fn create_xcb(instance: vkrust::vkrust::VkInstance) {
 	let (conn, screen_num) = xcb::Connection::connect(None).unwrap();
 	let setup = conn.get_setup();
 	let screen = setup.roots().nth(screen_num as usize).unwrap();
@@ -29,19 +29,21 @@ fn create_xcb() {
 	);
 	xcb::map_window(&conn, win);
 	conn.flush();
+
+	let surface_create_info = vkrust::vkrust::VkXcbSurfaceCreateInfoKHR {
+		sType: vkrust::vkrust::VkStructureType::VK_STRUCTURE_TYPE_XCB_SURFACE_CREATE_INFO_KHR,
+		pNext: ptr::null(),
+		flags: 0,
+		connection: &mut conn.get_raw_conn(),
+		window: win
+	};
+
+	unsafe {
+		vkrust::vkrust::vkCreateXcbSurfaceKHR(instance, &surface_create_info, ptr::null(), &surface);
+	}
 }
 
 fn main() {
-
-#[cfg(feature="xcb")]
-	{
-		println!("doing xcb");
-		create_xcb();
-	}
-#[cfg(not(feature="xcb"))]
-	{
-		const ERROR: () = "Must enable at least one WSI";
-	}
 
 	use vkrust::*;
 
@@ -135,6 +137,16 @@ fn main() {
 	assert!(device != vkrust::VK_NULL_HANDLE);
 	assert!(res == vkrust::VkResult::VK_SUCCESS);
 
+
+#[cfg(feature="xcb")]
+	{
+		println!("doing xcb");
+		create_xcb(instance);
+	}
+#[cfg(not(feature="xcb"))]
+	{
+		const ERROR: () = "Must enable at least one WSI";
+	}
 
 	let fragment_shader = "";
 	let vertex_shader = "";

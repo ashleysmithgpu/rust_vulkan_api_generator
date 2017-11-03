@@ -24,6 +24,15 @@ fn guess_type_from_name(name: &String) -> String {
 	}
 }
 
+fn c_wsi_types_to_rust_types(type_name: String) -> String {
+	match type_name.as_ref() {
+		"xcb_connection_t" => "pub type xcb_connection_t = *mut ffi::xcb_connection_t;".to_string(),
+//		"xcb_visualid_t " => "pub xcb_visualid_t = ffi::xcb_connection_t;".to_string(),
+		"xcb_window_t" => "pub type xcb_window_t = u32;".to_string(),
+		_ => format!("pub type {} = u64;", type_name.to_string())
+	}
+}
+
 fn translate_types(original_type: String) -> String {
 	match original_type.as_ref() {
 		"void" => "c_void".to_string(),
@@ -572,8 +581,12 @@ extern crate libc;
 #[macro_use]
 extern crate bitflags;
 
+extern crate xcb;
+
 pub mod vkrust {
 #![allow(non_snake_case)]
+
+use xcb::ffi;
 
 use libc::{/*c_int,*/ c_void};
 //use std::ptr;
@@ -656,7 +669,7 @@ pub struct VkClearValue {
 
 		// Print typedefs
 		for t in types {
-			write!(output, "#[allow(non_camel_case_types)]\npub type {} = u64;\n", t).expect("Failed to write");
+			write!(output, "#[allow(non_camel_case_types)]\n{}\n", c_wsi_types_to_rust_types(t)).expect("Failed to write");
 		}
 		for t in bitmask_types {
 			write!(output, "#[allow(non_camel_case_types)]\npub type {} = u32;\n", t).expect("Failed to write");
