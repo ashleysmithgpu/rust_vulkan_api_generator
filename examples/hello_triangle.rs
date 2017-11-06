@@ -88,6 +88,8 @@ fn main() {
 		enabledExtensionCount: enabled_extensions.len() as u32,
 		ppEnabledExtensionNames: enabled_extensions.as_ptr() as *const u8
 	};
+
+	// Create instance
 	unsafe {
 		res = vkrust::vkCreateInstance(&create_info, ptr::null(), &mut instance);
 	};
@@ -133,8 +135,8 @@ fn main() {
 		pEnabledFeatures: ptr::null()
 	};
 
+	// Create device
 	let mut device: vkrust::VkDevice = 0;
-
 	unsafe {
 		res = vkrust::vkCreateDevice(physical_device, &device_create_info, ptr::null(), &mut device);
 	};
@@ -144,6 +146,27 @@ fn main() {
 	{
 		let wsi_info = create_wsi(instance);
 		{
+			// Get present and graphics queue index
+
+			let mut queue_count = 0;
+			unsafe {
+				vkrust::vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &mut queue_count, ptr::null_mut());
+			}
+			assert!(queue_count > 0);
+
+			let mut queue_props = Vec::<vkrust::VkQueueFamilyProperties>::with_capacity(queue_count as usize);
+			unsafe {
+				vkrust::vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &mut queue_count, queue_props.as_mut_ptr());
+				queue_props.set_len(queue_count as usize);
+			}
+
+			let mut queue_supports_present = Vec::<bool>::with_capacity(queue_count as usize);
+			for i in 0..queue_count {
+				unsafe {
+					vkrust::vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, i, wsi_info.2, &mut queue_supports_present[i as usize]);
+				}
+			}
+
 		}
 		unsafe {
 			vkrust::vkDestroySurfaceKHR(instance, wsi_info.2, ptr::null());
