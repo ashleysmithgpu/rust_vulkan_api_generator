@@ -35,7 +35,7 @@ fn create_wsi(instance: vkrust::vkrust::VkInstance) -> (xcb::Connection, u32, u6
 			sType: vkrust::vkrust::VkStructureType::VK_STRUCTURE_TYPE_XCB_SURFACE_CREATE_INFO_KHR,
 			pNext: ptr::null(),
 			flags: 0,
-			connection: &mut conn.get_raw_conn(),
+			connection: conn.get_raw_conn(),
 			window: win
 		};
 
@@ -155,18 +155,63 @@ fn main() {
 			assert!(queue_count > 0);
 
 			let mut queue_props = Vec::<vkrust::VkQueueFamilyProperties>::with_capacity(queue_count as usize);
+			let mut queue_supports_present = Vec::<bool>::with_capacity(queue_count as usize);
 			unsafe {
 				vkrust::vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &mut queue_count, queue_props.as_mut_ptr());
 				queue_props.set_len(queue_count as usize);
+				queue_supports_present.set_len(queue_count as usize);
 			}
 
-			let mut queue_supports_present = Vec::<bool>::with_capacity(queue_count as usize);
 			for i in 0..queue_count {
 				unsafe {
 					vkrust::vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, i, wsi_info.2, &mut queue_supports_present[i as usize]);
 				}
 			}
 
+			let mut graphics_and_present_queue_index = 0;
+			let mut found_good_queue = false;
+			for (i,prop) in queue_props.iter().enumerate() {
+				if !(prop.queueFlags & vkrust::VkQueueFlags::VK_QUEUE_GRAPHICS_BIT).is_empty() && queue_supports_present[i] {
+					graphics_and_present_queue_index = i;
+					found_good_queue = true;
+				}
+			}
+			assert!(found_good_queue);
+
+			// Get a supported colour format and colour space
+			let mut format_count = 0;
+			unsafe {
+				vkrust::vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, wsi_info.2, &mut format_count, ptr::null_mut());
+			}
+			assert!(format_count > 0);
+
+			let mut surface_formats = Vec::<vkrust::VkSurfaceFormatKHR>::with_capacity(format_count as usize);
+			unsafe {
+				surface_formats.set_len(format_count as usize);
+				vkrust::vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, wsi_info.2, &mut format_count, surface_formats.as_mut_ptr());
+			}
+
+			let mut colour_format = vkrust::VkFormat::VK_FORMAT_B8G8R8A8_UNORM;
+			let mut colour_space = vkrust::VkColorSpaceKHR::VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+			if format_count == 1 && surface_formats[0].format == vkrust::VkFormat::VK_FORMAT_UNDEFINED {
+
+				colour_space = surface_formats[0].colorSpace.clone();
+			} else {
+
+				let mut found_b8g8r8a8_unorm = false;
+				for fmt in &surface_formats {
+					if fmt.format == vkrust::VkFormat::VK_FORMAT_B8G8R8A8_UNORM {
+						colour_format = fmt.format.clone();
+						colour_space = fmt.colorSpace.clone();
+						found_b8g8r8a8_unorm = true;
+						break;
+					}
+				}
+				if !found_b8g8r8a8_unorm {
+					colour_format = surface_formats[0].format.clone();
+					colour_space = surface_formats[0].colorSpace.clone();
+				}
+			}
 		}
 		unsafe {
 			vkrust::vkDestroySurfaceKHR(instance, wsi_info.2, ptr::null());

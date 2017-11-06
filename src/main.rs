@@ -26,7 +26,7 @@ fn guess_type_from_name(name: &String) -> String {
 
 fn c_wsi_types_to_rust_types(type_name: String) -> String {
 	match type_name.as_ref() {
-		"xcb_connection_t" => "pub type xcb_connection_t = *mut ffi::xcb_connection_t;".to_string(),
+		"xcb_connection_t" => "pub type xcb_connection_t = ffi::xcb_connection_t;".to_string(),
 //		"xcb_visualid_t " => "pub xcb_visualid_t = ffi::xcb_connection_t;".to_string(),
 		"xcb_window_t" => "pub type xcb_window_t = u32;".to_string(),
 		_ => format!("pub type {} = u64;", type_name.to_string())
@@ -165,6 +165,7 @@ fn main() {
 
 	let mut type_category = String::new();
 	let mut type_name = String::new();
+	let mut type_requires = String::new();
 
 	let mut define_type_value = String::new();
 
@@ -178,7 +179,7 @@ fn main() {
 
 	// name
 	let mut types = Vec::<String>::new();
-	let mut bitmask_types = Vec::<String>::new();
+	let mut bitmask_types = Vec::<(String, String)>::new();
 	let mut handle_types = Vec::<String>::new();
 	let mut define_types = Vec::<(String, String)>::new();
 
@@ -292,6 +293,11 @@ fn main() {
 							if let Some(category) = attributes.get("category") {
 								type_category = category.to_string();
 							}
+							if let Some(requires) = attributes.get("requires") {
+								type_requires = requires.to_string();
+							} else {
+								type_requires.clear();
+							}
 
 							if type_category == "struct" {
 								if let Some(name) = attributes.get("name") {
@@ -389,7 +395,7 @@ fn main() {
 					b"type" => {
 						if matching_what[0] == "types" {
 							let name = if let Some(name) = attributes.get("name") { name.to_string() } else { "".to_string() };
-							if let Some(requires) = attributes.get("requires") {
+							if attributes.contains_key("requires") {
 								types.push(name.to_string());
 							}
 						} else if matching_what[0] == "require" && matching_what[1] == "feature" {
@@ -539,7 +545,7 @@ fn main() {
 							if matching_what[1] == "types" {
 
 								if type_category == "bitmask" {
-									bitmask_types.push(type_name.clone());
+									bitmask_types.push((type_name.clone(), type_requires.clone()));
 								} else if type_category == "handle" {
 									handle_types.push(type_name.clone());
 								} else if type_category == "struct" && !struct_members.is_empty() {
@@ -635,11 +641,13 @@ pub type PFN_vkDebugReportCallbackEXT = *const c_void;
 pub type PFN_vkVoidFunction = *const c_void;
 
 // TODO: how to do unions in rust?
+#[derive(Clone)]
 #[repr(C)]
 pub struct VkClearColorValue {
 	col: f32
 }
 
+#[derive(Clone)]
 #[repr(C)]
 pub struct VkClearValue {
 	col: VkClearColorValue
@@ -672,7 +680,12 @@ pub struct VkClearValue {
 			write!(output, "#[allow(non_camel_case_types)]\n{}\n", c_wsi_types_to_rust_types(t)).expect("Failed to write");
 		}
 		for t in bitmask_types {
-			write!(output, "#[allow(non_camel_case_types)]\npub type {} = u32;\n", t).expect("Failed to write");
+			if t.1.is_empty() {
+				write!(output, "#[allow(non_camel_case_types)]\npub type {} = u32;\n", t.0).expect("Failed to write");
+			} else {
+				let type_name = t.0.replace("Flags", "FlagBits");
+				write!(output, "#[allow(non_camel_case_types)]\npub type {} = {};\n", t.0, t.1).expect("Failed to write");
+			}
 		}
 		for t in handle_types {
 			write!(output, "#[allow(non_camel_case_types)]\npub type {} = u64;\n", t).expect("Failed to write");
@@ -684,7 +697,7 @@ pub struct VkClearValue {
 
 		// Print enums
 		for e in enums {
-			write!(output, "#[allow(non_camel_case_types)]\n#[derive(PartialEq, Debug)]\n#[repr(C)]\npub enum {} {{\n", &e.name).expect("Failed to write");
+			write!(output, "#[allow(non_camel_case_types)]\n#[derive(Clone, PartialEq, Debug)]\n#[repr(C)]\npub enum {} {{\n", &e.name).expect("Failed to write");
 			for v in e.values {
 				write!(output, "\t{} = {},\n", v.0, v.1).expect("Failed to write");
 			}
@@ -750,7 +763,7 @@ pub struct VkClearValue {
 
 		// Print structs
 		for s in structs {
-			write!(output, "#[repr(C)]\npub struct {} {{\n{}\n}}\n", s.0, s.1).expect("Failed to write");
+			write!(output, "#[derive(Clone)]\n#[repr(C)]\npub struct {} {{\n{}\n}}\n", s.0, s.1).expect("Failed to write");
 		}
 
 		// Print functions
