@@ -683,7 +683,6 @@ pub struct VkClearValue {
 			if t.1.is_empty() {
 				write!(output, "#[allow(non_camel_case_types)]\npub type {} = u32;\n", t.0).expect("Failed to write");
 			} else {
-				let type_name = t.0.replace("Flags", "FlagBits");
 				write!(output, "#[allow(non_camel_case_types)]\npub type {} = {};\n", t.0, t.1).expect("Failed to write");
 			}
 		}
