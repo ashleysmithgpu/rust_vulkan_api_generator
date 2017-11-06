@@ -743,6 +743,8 @@ pub struct VkClearValue {
 					}
 				}
 				write!(output, "\t}}\n}}\n\n").expect("Failed to write");
+			} else {
+				write!(output, "bitflags! {{\n#[repr(C)]\n\tpub struct {}: u32 {{\n\t\tconst _EMPTY = 0;\n\t}}\n}}\n\n", b.name).expect("Failed to write");
 			}
 		}
 

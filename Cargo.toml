@@ -16,7 +16,7 @@ Inflector = "0.10.1"
 
 # TODO: when cargo supports setting depenencies per target, move these to lib only
 libc = "0.2.24"
-bitflags = "0.9.1"
+bitflags = "1.0"
 
 xcb = { version = "0.8", optional = true }
 
