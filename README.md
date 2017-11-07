@@ -87,9 +87,23 @@ Occasionally you will need to debug why the usermode driver of a particular vend
 ## Intel
 
 You will need to compile mesa with debugging symbols and optimisations turned off. First clone mesa somewhere
-```git://anongit.freedesktop.org/mesa/mesa```
+
+    git://anongit.freedesktop.org/mesa/mesa
 Now disable optimisations via CFLAGS and CXXFLAGS:
-```export CFLAGS="-g -O0"
-export CXXFLAGS="-g -O0"```
-Then configure it to enable the vulkan library and debugging symbols:
-```./configure --with-dri-drivers=i915 --with-vulkan-drivers=intel --enable-gles2 --with-gallium-drivers= --enable-debug```
+
+    export CFLAGS="-g -O0"
+    export CXXFLAGS="-g -O0"
+Then configure it to enable the vulkan library and debugging symbols and make:
+
+    ./configure --with-dri-drivers=i915 --with-vulkan-drivers=intel --enable-gles2 --with-gallium-drivers= --enable-debug
+	make
+Now create an ICD (Installable Client Driver) json file somewhere (debug_intel.json)
+    {
+      "file_format_version": "1.0.0",
+      "ICD": {
+        "library_path": "/path/to/libvulkan_intel.so",
+        "api_version": "1.0.3"
+      }
+    }
+Point your application at it with an environment variable:
+	export VK_ICD_FILENAMES=/path/to/debug_intel.json
