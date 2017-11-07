@@ -52,6 +52,19 @@ fn create_wsi(instance: vkrust::vkrust::VkInstance) -> (xcb::Connection, u32, u6
 	(conn, win, surface)
 }
 
+fn get_memory_type(type_bits: u32, properties: vkrust::vkrust::VkMemoryPropertyFlags, device_memory_properties: vkrust::vkrust::VkPhysicalDeviceMemoryProperties) -> Option<u32> {
+	let mut type_bits_mut = type_bits.clone();
+	for i in 0..device_memory_properties.memoryTypeCount {
+		if (type_bits_mut & 1) == 1 {
+			if (device_memory_properties.memoryTypes[i as usize].propertyFlags & properties) == properties {
+				return Some(i)
+			}
+		}
+		type_bits_mut >>= 1;
+	}
+	None
+}
+
 fn main() {
 
 	use vkrust::*;
@@ -64,8 +77,8 @@ fn main() {
 			"VK_LAYER_LUNARG_standard_validation".to_string(),
 		];*/
 		let enabled_extensions_rust = vec![
-			"VK_KHR_surface".to_string(),
-			"VK_KHR_xcb_surface".to_string()
+			"VK_KHR_surface\0".to_string(),
+			"VK_KHR_xcb_surface\0".to_string()
 		];
 
 		let enabled_layers: Vec<*const u8> = vec![
@@ -118,6 +131,13 @@ fn main() {
 
 	assert!(physical_device != vkrust::VK_NULL_HANDLE);
 
+	let mut global_memory_properties: vkrust::VkPhysicalDeviceMemoryProperties;
+
+	unsafe {
+		global_memory_properties = std::mem::uninitialized();
+		vkrust::vkGetPhysicalDeviceMemoryProperties(physical_device, &mut global_memory_properties);
+	}
+
 	let priorities: [f32; 1] = [1.0];
 
 	let queue_create_info = vkrust::VkDeviceQueueCreateInfo {
@@ -132,10 +152,10 @@ fn main() {
 	let mut device: vkrust::VkDevice = 0;
 	{
 		let enabled_layers_rust = vec![
-			"VK_LAYER_LUNARG_standard_validation".to_string(),
+			"VK_LAYER_LUNARG_standard_validation\0".to_string(),
 		];
 		let enabled_extensions_rust = vec![
-			"VK_KHR_swapchain".to_string()
+			"VK_KHR_swapchain\0".to_string()
 		];
 
 		let enabled_layers: Vec<*const u8> = vec![
@@ -380,6 +400,77 @@ fn main() {
 				unsafe {
 					command_buffers.set_len(swapchain_image_count as usize);
 					res = vkrust::vkAllocateCommandBuffers(device, &cmd_buf_create_info, command_buffers.as_mut_ptr());
+				}
+				assert!(res == vkrust::VkResult::VK_SUCCESS);
+			}
+
+			// Create depth stencil
+			println!("Creating depth/stencil images");
+			let mut ds_image: vkrust::VkImage = 0;
+			let mut ds_image_view: vkrust::VkImageView = 0;
+			let mut ds_mem: vkrust::VkDeviceMemory = 0;
+			let depth_format = vkrust::VkFormat::VK_FORMAT_D24_UNORM_S8_UINT;
+			{
+				let image_create_info = vkrust::VkImageCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+					pNext: ptr::null(),
+					flags: vkrust::VkImageCreateFlags::empty(),
+					imageType: vkrust::VkImageType::VK_IMAGE_TYPE_2D,
+					format: depth_format,
+					extent: vkrust::VkExtent3D { width: WIDTH, height: HEIGHT, depth: 1 },
+					mipLevels: 1,
+					arrayLayers: 1,
+					samples: vkrust::VkSampleCountFlagBits::VK_SAMPLE_COUNT_1_BIT,
+					tiling: vkrust::VkImageTiling::VK_IMAGE_TILING_OPTIMAL,
+					usage: vkrust::VkImageUsageFlags::VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | vkrust::VkImageUsageFlags::VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+					sharingMode: vkrust::VkSharingMode::VK_SHARING_MODE_EXCLUSIVE,
+					queueFamilyIndexCount: 0,
+					pQueueFamilyIndices: ptr::null(),
+					initialLayout: vkrust::VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED
+				};
+				let mut mem_alloc = vkrust::VkMemoryAllocateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+					pNext: ptr::null(),
+					allocationSize: 0,
+					memoryTypeIndex: 0
+				};
+				let mut mem_reqs: vkrust::VkMemoryRequirements;
+
+				unsafe {
+					res = vkrust::vkCreateImage(device, &image_create_info, ptr::null(), &mut ds_image);
+					assert!(res == vkrust::VkResult::VK_SUCCESS);
+					mem_reqs = std::mem::uninitialized();
+					vkrust::vkGetImageMemoryRequirements(device, ds_image, &mut mem_reqs);
+				}
+				let ds_view = vkrust::VkImageViewCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+					pNext: ptr::null(),
+					flags: 0,
+					image: ds_image,
+					viewType: vkrust::VkImageViewType::VK_IMAGE_VIEW_TYPE_2D,
+					format: depth_format,
+					components: vkrust::VkComponentMapping {
+						r: vkrust::VkComponentSwizzle::VK_COMPONENT_SWIZZLE_R,
+						g: vkrust::VkComponentSwizzle::VK_COMPONENT_SWIZZLE_IDENTITY,
+						b: vkrust::VkComponentSwizzle::VK_COMPONENT_SWIZZLE_IDENTITY,
+						a: vkrust::VkComponentSwizzle::VK_COMPONENT_SWIZZLE_IDENTITY
+					},
+					subresourceRange: vkrust::VkImageSubresourceRange {
+						aspectMask: vkrust::VkImageAspectFlags::VK_IMAGE_ASPECT_DEPTH_BIT | vkrust::VkImageAspectFlags::VK_IMAGE_ASPECT_STENCIL_BIT,
+						baseMipLevel: 0,
+						levelCount: 1,
+						baseArrayLayer: 0,
+						layerCount: 1
+					}
+				};
+				mem_alloc.allocationSize = mem_reqs.size;
+				mem_alloc.memoryTypeIndex = get_memory_type(mem_reqs.memoryTypeBits, vkrust::VkMemoryPropertyFlagBits::VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, global_memory_properties).unwrap();
+				unsafe {
+					res = vkrust::vkAllocateMemory(device, &mem_alloc, ptr::null(), &mut ds_mem);
+					assert!(res == vkrust::VkResult::VK_SUCCESS);
+					res = vkrust::vkBindImageMemory(device, ds_image, ds_mem, 0);
+					assert!(res == vkrust::VkResult::VK_SUCCESS);
+					res = vkrust::vkCreateImageView(device, &ds_view, ptr::null(), &mut ds_image_view);
 				}
 				assert!(res == vkrust::VkResult::VK_SUCCESS);
 			}
