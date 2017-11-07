@@ -42,9 +42,11 @@ fn create_wsi(instance: vkrust::vkrust::VkInstance) -> (xcb::Connection, u32, u6
 			window: win
 		};
 
+		let res;
 		unsafe {
-			vkrust::vkrust::vkCreateXcbSurfaceKHR(instance, &surface_create_info, ptr::null(), &mut surface);
+			res = vkrust::vkrust::vkCreateXcbSurfaceKHR(instance, &surface_create_info, ptr::null(), &mut surface);
 		}
+		assert!(res == vkrust::vkrust::VkResult::VK_SUCCESS);
 	}
 
 	(conn, win, surface)
@@ -57,16 +59,16 @@ fn main() {
 	let mut res: vkrust::VkResult;
 	let mut instance: vkrust::VkInstance = 0;
 	{
-		let enabled_layers_rust = vec![
+		// Don't enable this layer here, it seems to break the lunarg code
+		/*let enabled_layers_rust = vec![
 			"VK_LAYER_LUNARG_standard_validation".to_string(),
-		];
+		];*/
 		let enabled_extensions_rust = vec![
 			"VK_KHR_surface".to_string(),
 			"VK_KHR_xcb_surface".to_string()
 		];
 
 		let enabled_layers: Vec<*const u8> = vec![
-			enabled_layers_rust[0].as_ptr()
 		];
 		let enabled_extensions: Vec<*const u8> = vec![
 			enabled_extensions_rust[0].as_ptr(),
@@ -265,13 +267,13 @@ fn main() {
 			// TODO: check these properly
 			let present_mode = vkrust::VkPresentModeKHR::VK_PRESENT_MODE_FIFO_KHR;
 
-			let number_of_swapchain_images = surface_capabilities.maxImageCount;
+			let number_of_swapchain_images = surface_capabilities.minImageCount;
 
 			let swapchain_transform = vkrust::VkSurfaceTransformFlagsKHR::VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
 
 			let composite_alpha = vkrust::VkCompositeAlphaFlagBitsKHR::VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 
-			let mut swapchain_create_info = vkrust::VkSwapchainCreateInfoKHR {
+			let swapchain_create_info = vkrust::VkSwapchainCreateInfoKHR {
 				sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
 				pNext: ptr::null(),
 				flags: vkrust::VkSwapchainCreateFlagBitsKHR::_EMPTY,
@@ -295,11 +297,99 @@ fn main() {
 			let mut swapchain: vkrust::VkSwapchainKHR = 0;
 			{
 				unsafe {
-					vkrust::vkCreateSwapchainKHR(device, &mut swapchain_create_info, ptr::null(), &mut swapchain);
+					res = vkrust::vkCreateSwapchainKHR(device, &swapchain_create_info, ptr::null(), &mut swapchain);
 				}
+				assert!(res == vkrust::VkResult::VK_SUCCESS);
+			}
+
+			let mut swapchain_image_count = 0;
+			unsafe {
+				vkrust::vkGetSwapchainImagesKHR(device, swapchain, &mut swapchain_image_count, ptr::null_mut());
+			}
+			assert!(swapchain_image_count > 0);
+			println!("Creating {} swapchain images", swapchain_image_count);
+			let mut swapchain_images = Vec::<vkrust::VkImage>::with_capacity(swapchain_image_count as usize);
+			unsafe {
+				swapchain_images.set_len(swapchain_image_count as usize);
+				vkrust::vkGetSwapchainImagesKHR(device, swapchain, &mut swapchain_image_count, swapchain_images.as_mut_ptr());
+			}
+
+			let mut swapchain_image_views = Vec::<vkrust::VkImageView>::with_capacity(swapchain_image_count as usize);
+			unsafe {
+				swapchain_image_views.set_len(swapchain_image_count as usize);
+			}
+			for i in 0..swapchain_image_count {
+				let img_create_info = vkrust::VkImageViewCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+					pNext: ptr::null(),
+					//flags: vkrust::VkImageViewCreateFlags::_EMPTY,
+					flags: 0,
+					image: swapchain_images[i as usize],
+					viewType: vkrust::VkImageViewType::VK_IMAGE_VIEW_TYPE_2D,
+					format: colour_format,
+					components: vkrust::VkComponentMapping {
+						r: vkrust::VkComponentSwizzle::VK_COMPONENT_SWIZZLE_R,
+						g: vkrust::VkComponentSwizzle::VK_COMPONENT_SWIZZLE_G,
+						b: vkrust::VkComponentSwizzle::VK_COMPONENT_SWIZZLE_B,
+						a: vkrust::VkComponentSwizzle::VK_COMPONENT_SWIZZLE_A
+					},
+					subresourceRange: vkrust::VkImageSubresourceRange {
+						aspectMask: vkrust::VkImageAspectFlags::VK_IMAGE_ASPECT_COLOR_BIT,
+						baseMipLevel: 0,
+						levelCount: 1,
+						baseArrayLayer: 0,
+						layerCount: 1
+					}
+				};
+
+				unsafe{
+					res = vkrust::vkCreateImageView(device, &img_create_info, ptr::null(), &mut swapchain_image_views[i as usize]);
+				}
+				assert!(res == vkrust::VkResult::VK_SUCCESS);
+			}
+
+			// Create command pool
+			println!("Creating command pool");
+			let mut command_pool: vkrust::VkCommandPool = 0;
+			{
+				let pool_create_info = vkrust::VkCommandPoolCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+					pNext: ptr::null(),
+					flags: vkrust::VkCommandPoolCreateFlags::VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+					queueFamilyIndex: 0
+				};
+				unsafe {
+					res = vkrust::vkCreateCommandPool(device, &pool_create_info, ptr::null(), &mut command_pool);
+				}
+				assert!(res == vkrust::VkResult::VK_SUCCESS);
+			}
+
+
+			// Create command buffers
+			println!("Creating command buffers");
+			let mut command_buffers = Vec::<vkrust::VkCommandBuffer>::with_capacity(swapchain_image_count as usize);
+			{
+				let cmd_buf_create_info = vkrust::VkCommandBufferAllocateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+					pNext: ptr::null(),
+					commandPool: command_pool,
+					level: vkrust::VkCommandBufferLevel::VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+					commandBufferCount: swapchain_image_count
+				};
+
+				unsafe {
+					command_buffers.set_len(swapchain_image_count as usize);
+					res = vkrust::vkAllocateCommandBuffers(device, &cmd_buf_create_info, command_buffers.as_mut_ptr());
+				}
+				assert!(res == vkrust::VkResult::VK_SUCCESS);
 			}
 
 			unsafe {
+				vkrust::vkFreeCommandBuffers(device, command_pool, command_buffers.len() as u32, command_buffers.as_ptr());
+				vkrust::vkDestroyCommandPool(device, command_pool, ptr::null());
+				for i in 0..swapchain_image_count {
+					vkrust::vkDestroyImageView(device, swapchain_image_views[i as usize], ptr::null());
+				}
 				vkrust::vkDestroySwapchainKHR(device, swapchain, ptr::null());
 			}
 		}

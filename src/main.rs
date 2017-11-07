@@ -696,7 +696,7 @@ pub struct VkClearValue {
 
 		// Print enums
 		for e in enums {
-			write!(output, "#[allow(non_camel_case_types)]\n#[derive(Clone, PartialEq, Debug)]\n#[repr(C)]\npub enum {} {{\n", &e.name).expect("Failed to write");
+			write!(output, "#[allow(non_camel_case_types)]\n#[derive(Copy, Clone, PartialEq, Debug)]\n#[repr(C)]\npub enum {} {{\n", &e.name).expect("Failed to write");
 			for v in e.values {
 				write!(output, "\t{} = {},\n", v.0, v.1).expect("Failed to write");
 			}
