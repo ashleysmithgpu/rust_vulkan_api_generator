@@ -1,15 +1,22 @@
 # vkrust
 
-Plan to expose an unsafe interface that basically mirrors the C interface, but in rust and a safe interface that wraps the unsafe operations as much as possible and moves vkCreate*, vkDestroy* to constructors/destructors.
+This library exposes an unsafe Vulkan interface that mirrors the C interface in rust. It will also expose a safe interface that wraps the unsafe operations as much as possible and handles lifetimes of Vulkan objects.
 
-Currently working:
+## Note
+
+This is my attempt to learn rust... You probably don't want to use this code yet :)
+
+# How to use
 
 Binary to convert the vulkan vk.xml file to an API usable in rust.
 
 I.e.
 ```bash
+touch src/lib.rs
 wget https://raw.githubusercontent.com/KhronosGroup/Vulkan-LoaderAndValidationLayers/master/scripts/vk.xml
-./rust_vulkan_api_generator vk.xml -o src/lib.rs
+cargo build
+target/debug/rust_vulkan_api_generator vk.xml -o src/lib.rs
+cargo build --examples
 ```
 
 Unsafe library to use vulkan in rust.
@@ -59,10 +66,6 @@ fn main() {
 - [ ] Loader implementation
 - [ ] Tests
 
-## Note
-
-This is my attempt to learn rust... You probably don't want to use this code yet :)
-
 ## Interesting stuff
 
 I'm really liking rust, imagine the bugs that this eliminates:
@@ -77,3 +80,16 @@ pub enum VkStructureType {
 Rust disallows enum values not present by default so we can only pass valid values to whatever takes a VkStructureType.
 Match (switch) statements that don't handle all values (cases) are known at compile time.
 
+# Debugging
+
+Occasionally you will need to debug why the usermode driver of a particular vendor crashes because the layers do not catch the error. At least for intel and AMD you can do this.
+
+## Intel
+
+You will need to compile mesa with debugging symbols and optimisations turned off. First clone mesa somewhere
+```git://anongit.freedesktop.org/mesa/mesa```
+Now disable optimisations via CFLAGS and CXXFLAGS:
+```export CFLAGS="-g -O0"
+export CXXFLAGS="-g -O0"```
+Then configure it to enable the vulkan library and debugging symbols:
+```./configure --with-dri-drivers=i915 --with-vulkan-drivers=intel --enable-gles2 --with-gallium-drivers= --enable-debug```
