@@ -475,7 +475,98 @@ fn main() {
 				assert!(res == vkrust::VkResult::VK_SUCCESS);
 			}
 
+			// Create render pass
+			println!("Creating render pass");
+			let mut render_pass: vkrust::VkRenderPass = 0;
+			{
+				let attachments = [
+					vkrust::VkAttachmentDescription {
+						flags: vkrust::VkAttachmentDescriptionFlags::_EMPTY,
+						format: colour_format,
+						samples: vkrust::VkSampleCountFlagBits::VK_SAMPLE_COUNT_1_BIT,
+						loadOp: vkrust::VkAttachmentLoadOp::VK_ATTACHMENT_LOAD_OP_CLEAR,
+						storeOp: vkrust::VkAttachmentStoreOp::VK_ATTACHMENT_STORE_OP_STORE,
+						stencilLoadOp: vkrust::VkAttachmentLoadOp::VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+						stencilStoreOp: vkrust::VkAttachmentStoreOp::VK_ATTACHMENT_STORE_OP_DONT_CARE,
+						initialLayout: vkrust::VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED,
+						finalLayout: vkrust::VkImageLayout::VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+					},
+					vkrust::VkAttachmentDescription {
+						flags: vkrust::VkAttachmentDescriptionFlags::_EMPTY,
+						format: depth_format,
+						samples: vkrust::VkSampleCountFlagBits::VK_SAMPLE_COUNT_1_BIT,
+						loadOp: vkrust::VkAttachmentLoadOp::VK_ATTACHMENT_LOAD_OP_CLEAR,
+						storeOp: vkrust::VkAttachmentStoreOp::VK_ATTACHMENT_STORE_OP_STORE,
+						stencilLoadOp: vkrust::VkAttachmentLoadOp::VK_ATTACHMENT_LOAD_OP_CLEAR,
+						stencilStoreOp: vkrust::VkAttachmentStoreOp::VK_ATTACHMENT_STORE_OP_DONT_CARE,
+						initialLayout: vkrust::VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED,
+						finalLayout: vkrust::VkImageLayout::VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+					}
+				];
+
+				let colour_reference = vkrust::VkAttachmentReference {
+					attachment: 0,
+					layout: vkrust::VkImageLayout::VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+				};
+				let depth_reference = vkrust::VkAttachmentReference {
+					attachment: 1,
+					layout: vkrust::VkImageLayout::VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+				};
+				let subpass = vkrust::VkSubpassDescription {
+					flags: vkrust::VkSubpassDescriptionFlags::_EMPTY,
+					pipelineBindPoint: vkrust::VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS,
+					inputAttachmentCount: 0,
+					pInputAttachments: ptr::null(),
+					colorAttachmentCount: 1,
+					pColorAttachments: &colour_reference,
+					pResolveAttachments: ptr::null(),
+					pDepthStencilAttachment: &depth_reference,
+					preserveAttachmentCount: 0,
+					pPreserveAttachments: ptr::null()
+				};
+				let dependencies = [
+					vkrust::VkSubpassDependency {
+						srcSubpass: vkrust::VK_SUBPASS_EXTERNAL as u32,
+						dstSubpass: 0,
+						srcStageMask: vkrust::VkPipelineStageFlags::VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+						dstStageMask: vkrust::VkPipelineStageFlags::VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+						srcAccessMask: vkrust::VkAccessFlags::VK_ACCESS_MEMORY_READ_BIT,
+						dstAccessMask: vkrust::VkAccessFlags::VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | vkrust::VkAccessFlags::VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+						dependencyFlags: vkrust::VkDependencyFlags::VK_DEPENDENCY_BY_REGION_BIT,
+					},
+					vkrust::VkSubpassDependency {
+						srcSubpass: 0,
+						dstSubpass: vkrust::VK_SUBPASS_EXTERNAL as u32,
+						srcStageMask: vkrust::VkPipelineStageFlags::VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+						dstStageMask: vkrust::VkPipelineStageFlags::VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+						srcAccessMask: vkrust::VkAccessFlags::VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | vkrust::VkAccessFlags::VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+						dstAccessMask: vkrust::VkAccessFlags::VK_ACCESS_MEMORY_READ_BIT,
+						dependencyFlags: vkrust::VkDependencyFlags::VK_DEPENDENCY_BY_REGION_BIT,
+					}
+				];
+				let render_pass_create_info = vkrust::VkRenderPassCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+					pNext: ptr::null(),
+					flags: 0,
+					attachmentCount: attachments.len() as u32,
+					pAttachments: attachments.as_ptr(),
+					subpassCount: 1,
+					pSubpasses: &subpass,
+					dependencyCount: dependencies.len() as u32,
+					pDependencies: dependencies.as_ptr()
+				};
+
+				unsafe {
+					res = vkrust::vkCreateRenderPass(device, &render_pass_create_info, ptr::null(), &mut render_pass);
+				}
+				assert!(res == vkrust::VkResult::VK_SUCCESS);
+			}
+
 			unsafe {
+				vkrust::vkDestroyImage(device, ds_image, ptr::null());
+				vkrust::vkFreeMemory(device, ds_mem, ptr::null());
+				vkrust::vkDestroyImageView(device, ds_image_view, ptr::null());
+
 				vkrust::vkFreeCommandBuffers(device, command_pool, command_buffers.len() as u32, command_buffers.as_ptr());
 				vkrust::vkDestroyCommandPool(device, command_pool, ptr::null());
 				for i in 0..swapchain_image_count {

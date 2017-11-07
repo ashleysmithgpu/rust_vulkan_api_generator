@@ -641,15 +641,15 @@ pub type PFN_vkDebugReportCallbackEXT = *const c_void;
 pub type PFN_vkVoidFunction = *const c_void;
 
 // TODO: how to do unions in rust?
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 #[repr(C)]
-pub struct VkClearColorValue {
+pub union VkClearColorValue {
 	col: f32
 }
 
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 #[repr(C)]
-pub struct VkClearValue {
+pub union VkClearValue {
 	col: VkClearColorValue
 }"#;
 	{
@@ -733,6 +733,7 @@ pub struct VkClearValue {
 
 			if b.values.len() > 0 {
 				write!(output, "bitflags! {{\n#[repr(C)]\n\tpub struct {}: u32 {{\n", b.name).expect("Failed to write");
+				write!(output, "\t\tconst _EMPTY = 0;").expect("Failed to write");
 
 				for v in b.values {
 
