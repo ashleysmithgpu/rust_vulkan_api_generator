@@ -1,6 +1,11 @@
 
 extern crate vkrust;
 
+extern crate libc;
+
+extern crate glm;
+extern crate num;
+
 #[cfg(feature="xcb")]
 extern crate xcb;
 
@@ -52,7 +57,7 @@ fn create_wsi(instance: vkrust::vkrust::VkInstance) -> (xcb::Connection, u32, u6
 	(conn, win, surface)
 }
 
-fn get_memory_type(type_bits: u32, properties: vkrust::vkrust::VkMemoryPropertyFlags, device_memory_properties: vkrust::vkrust::VkPhysicalDeviceMemoryProperties) -> Option<u32> {
+fn get_memory_type(type_bits: u32, properties: vkrust::vkrust::VkMemoryPropertyFlags, device_memory_properties: &vkrust::vkrust::VkPhysicalDeviceMemoryProperties) -> Option<u32> {
 	let mut type_bits_mut = type_bits.clone();
 	for i in 0..device_memory_properties.memoryTypeCount {
 		if (type_bits_mut & 1) == 1 {
@@ -464,7 +469,7 @@ fn main() {
 					}
 				};
 				mem_alloc.allocationSize = mem_reqs.size;
-				mem_alloc.memoryTypeIndex = get_memory_type(mem_reqs.memoryTypeBits, vkrust::VkMemoryPropertyFlagBits::VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, global_memory_properties).unwrap();
+				mem_alloc.memoryTypeIndex = get_memory_type(mem_reqs.memoryTypeBits, vkrust::VkMemoryPropertyFlagBits::VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &global_memory_properties).unwrap();
 				unsafe {
 					res = vkrust::vkAllocateMemory(device, &mem_alloc, ptr::null(), &mut ds_mem);
 					assert!(res == vkrust::VkResult::VK_SUCCESS);
@@ -562,7 +567,314 @@ fn main() {
 				assert!(res == vkrust::VkResult::VK_SUCCESS);
 			}
 
+			// Pipeline cache
+			println!("Creating pipeline cache");
+			let mut pipeline_cache: vkrust::VkPipeline = 0;
+			{
+				let pipeline_create_info = vkrust::VkPipelineCacheCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
+					pNext: ptr::null(),
+					flags: 0,
+					initialDataSize: 0,
+					pInitialData: ptr::null()
+				};
+				unsafe {
+					res = vkrust::vkCreatePipelineCache(device, &pipeline_create_info, ptr::null(), &mut pipeline_cache);
+				}
+				assert!(res == vkrust::VkResult::VK_SUCCESS);
+			}
+
+			// Framebuffer
+			println!("Creating framebuffers");
+			let mut framebuffers = Vec::<vkrust::VkFramebuffer>::with_capacity(swapchain_image_count as usize);
+			{
+				unsafe {
+					framebuffers.set_len(swapchain_image_count as usize);
+				}
+				let mut attachments = [vkrust::VK_NULL_HANDLE, ds_image_view];
+				let fb_create_info = vkrust::VkFramebufferCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+					pNext: ptr::null(),
+					flags: 0,
+					renderPass: render_pass,
+					attachmentCount: attachments.len() as u32,
+					pAttachments: attachments.as_ptr(),
+					width: WIDTH,
+					height: HEIGHT,
+					layers: 1
+				};
+				for i in 0..swapchain_image_count {
+					attachments[0] = swapchain_image_views[i as usize];
+
+					unsafe {
+						res = vkrust::vkCreateFramebuffer(device, &fb_create_info, ptr::null(), &mut framebuffers[i as usize]);
+					}
+					assert!(res == vkrust::VkResult::VK_SUCCESS);
+				};
+			}
+
+			// Fences and semaphores
+			println!("Creating sync prims");
+			let mut present_complete_sem: vkrust::VkSemaphore = 0;
+			let mut render_complete_sem: vkrust::VkSemaphore = 0;
+			let mut fences = Vec::<vkrust::VkFence>::with_capacity(swapchain_image_count as usize);
+			{
+				let sem_create_info = vkrust::VkSemaphoreCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+					pNext: ptr::null(),
+					flags: 0
+				};
+				unsafe {
+					fences.set_len(swapchain_image_count as usize);
+					res = vkrust::vkCreateSemaphore(device, &sem_create_info, ptr::null(), &mut present_complete_sem);
+					assert!(res == vkrust::VkResult::VK_SUCCESS);
+					res = vkrust::vkCreateSemaphore(device, &sem_create_info, ptr::null(), &mut render_complete_sem);
+				}
+				assert!(res == vkrust::VkResult::VK_SUCCESS);
+
+				let fence_create_info = vkrust::VkFenceCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+					pNext: ptr::null(),
+					flags: vkrust::VkFenceCreateFlags::_EMPTY
+				};
+				for i in 0..swapchain_image_count {
+					unsafe {
+						res = vkrust::vkCreateFence(device, &fence_create_info, ptr::null(), &mut fences[i as usize]);
+					}
+					assert!(res == vkrust::VkResult::VK_SUCCESS);
+				}
+			}
+
+			let use_staging = false;
+
+			// Vertex/index data
+			println!("Creating verticies/indicies");
+			let mut vertex_buffer: vkrust::VkBuffer = 0;
+			let num_vertices = 3;
+			let vertex_size = std::mem::size_of::<f32>() * 6;
+			let mut vertex_mem: vkrust::VkDeviceMemory = 0;
+
+			let mut index_buffer: vkrust::VkBuffer = 0;
+			let num_indicies = 3;
+			let index_size = std::mem::size_of::<u32>();
+			let mut index_mem: vkrust::VkDeviceMemory = 0;
+			{
+				let vertices: [f32; 18] = [
+					1.0, 1.0, 0.0,	1.0, 0.0, 0.0,
+					-1.0, 1.0, 0.0,	0.0, 1.0, 0.0,
+					0.0, -1.0, 0.0,	0.0, 0.0, 1.0
+				];
+
+				let indicies: [u32; 3] = [0, 1, 2];
+
+				if use_staging {
+					// TODO
+				} else {
+					{
+						let vb_create_info = vkrust::VkBufferCreateInfo {
+							sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+							pNext: ptr::null(),
+							flags: vkrust::VkBufferCreateFlags::_EMPTY,
+							size: num_vertices * vertex_size as u64,
+							usage: vkrust::VkBufferUsageFlags::VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+							sharingMode: vkrust::VkSharingMode::VK_SHARING_MODE_EXCLUSIVE,
+							queueFamilyIndexCount: 0,
+							pQueueFamilyIndices: ptr::null()
+						};
+
+						unsafe {
+							res = vkrust::vkCreateBuffer(device, &vb_create_info, ptr::null(), &mut vertex_buffer);
+						}
+						assert!(res == vkrust::VkResult::VK_SUCCESS);
+
+						let mut mem_reqs: vkrust::VkMemoryRequirements;
+						unsafe {
+							mem_reqs = std::mem::uninitialized();
+							vkrust::vkGetBufferMemoryRequirements(device, vertex_buffer, &mut mem_reqs);
+						}
+						let mut mem_alloc = vkrust::VkMemoryAllocateInfo {
+							sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+							pNext: ptr::null(),
+							allocationSize: mem_reqs.size,
+							memoryTypeIndex: get_memory_type(mem_reqs.memoryTypeBits, vkrust::VkMemoryPropertyFlagBits::VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | vkrust::VkMemoryPropertyFlagBits::VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &global_memory_properties).unwrap()
+						};
+						unsafe {
+							res = vkrust::vkAllocateMemory(device, &mem_alloc, ptr::null(), &mut vertex_mem);
+							assert!(res == vkrust::VkResult::VK_SUCCESS);
+							let mut data: *mut libc::c_void = ptr::null_mut();
+							res = vkrust::vkMapMemory(device, vertex_mem, 0, mem_alloc.allocationSize, 0, &mut data);
+							assert!(res == vkrust::VkResult::VK_SUCCESS);
+							assert!(data != ptr::null_mut());
+							libc::memcpy(data, vertices.as_ptr() as *mut libc::c_void, (num_vertices as usize * vertex_size as usize) as libc::size_t);
+							vkrust::vkUnmapMemory(device, vertex_mem);
+							res = vkrust::vkBindBufferMemory(device, vertex_buffer, vertex_mem, 0);
+						}
+						assert!(res == vkrust::VkResult::VK_SUCCESS);
+					}
+
+					{
+						let ib_create_info = vkrust::VkBufferCreateInfo {
+							sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+							pNext: ptr::null(),
+							flags: vkrust::VkBufferCreateFlags::_EMPTY,
+							size: num_indicies * index_size as u64,
+							usage: vkrust::VkBufferUsageFlags::VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+							sharingMode: vkrust::VkSharingMode::VK_SHARING_MODE_EXCLUSIVE,
+							queueFamilyIndexCount: 0,
+							pQueueFamilyIndices: ptr::null()
+						};
+
+						unsafe {
+							res = vkrust::vkCreateBuffer(device, &ib_create_info, ptr::null(), &mut index_buffer);
+						}
+						assert!(res == vkrust::VkResult::VK_SUCCESS);
+
+						let mut mem_reqs: vkrust::VkMemoryRequirements;
+						unsafe {
+							mem_reqs = std::mem::uninitialized();
+							vkrust::vkGetBufferMemoryRequirements(device, index_buffer, &mut mem_reqs);
+						}
+						let mem_alloc = vkrust::VkMemoryAllocateInfo {
+							sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+							pNext: ptr::null(),
+							allocationSize: mem_reqs.size,
+							memoryTypeIndex: get_memory_type(mem_reqs.memoryTypeBits, vkrust::VkMemoryPropertyFlagBits::VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | vkrust::VkMemoryPropertyFlagBits::VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &global_memory_properties).unwrap()
+						};
+						unsafe {
+							res = vkrust::vkAllocateMemory(device, &mem_alloc, ptr::null(), &mut index_mem);
+							assert!(res == vkrust::VkResult::VK_SUCCESS);
+							let mut data: *mut libc::c_void = ptr::null_mut();
+							res = vkrust::vkMapMemory(device, index_mem, 0, mem_alloc.allocationSize, 0, &mut data);
+							assert!(res == vkrust::VkResult::VK_SUCCESS);
+							assert!(data != ptr::null_mut());
+							libc::memcpy(data, indicies.as_ptr() as *mut libc::c_void, (num_indicies as usize * index_size as usize) as libc::size_t);
+							vkrust::vkUnmapMemory(device, index_mem);
+							res = vkrust::vkBindBufferMemory(device, index_buffer, index_mem, 0);
+						}
+						assert!(res == vkrust::VkResult::VK_SUCCESS);
+					}
+				}
+			}
+
+			#[repr(C)]
+			struct UniformBufferData {
+				projection_from_view: glm::Mat4,
+				view_from_model: glm::Mat4,
+				world_from_model: glm::Mat4
+			};
+
+			println!("ubsz {}", std::mem::size_of::<UniformBufferData>());
+
+			// Uniform buffers
+			println!("Creating uniform buffers");
+			let mut uniform_buffer: vkrust::VkBuffer = 0;
+			let mut uniform_buffer_mem: vkrust::VkDeviceMemory = 0;
+			{
+				let ub_create_info = vkrust::VkBufferCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+					pNext: ptr::null(),
+					flags: vkrust::VkBufferCreateFlags::_EMPTY,
+					size: std::mem::size_of::<UniformBufferData>() as u64,
+					usage: vkrust::VkBufferUsageFlags::VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+					sharingMode: vkrust::VkSharingMode::VK_SHARING_MODE_EXCLUSIVE,
+					queueFamilyIndexCount: 0,
+					pQueueFamilyIndices: ptr::null()
+				};
+
+				unsafe {
+					res = vkrust::vkCreateBuffer(device, &ub_create_info, ptr::null(), &mut uniform_buffer);
+					assert!(res == vkrust::VkResult::VK_SUCCESS);
+				}
+
+				let mut mem_reqs: vkrust::VkMemoryRequirements;
+				unsafe {
+					mem_reqs = std::mem::uninitialized();
+					vkrust::vkGetBufferMemoryRequirements(device, uniform_buffer, &mut mem_reqs);
+				}
+				let mem_alloc = vkrust::VkMemoryAllocateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+					pNext: ptr::null(),
+					allocationSize: mem_reqs.size,
+					memoryTypeIndex: get_memory_type(mem_reqs.memoryTypeBits, vkrust::VkMemoryPropertyFlagBits::VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | vkrust::VkMemoryPropertyFlagBits::VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &global_memory_properties).unwrap()
+				};
+				unsafe {
+					res = vkrust::vkAllocateMemory(device, &mem_alloc, ptr::null(), &mut uniform_buffer_mem);
+					assert!(res == vkrust::VkResult::VK_SUCCESS);
+					res = vkrust::vkBindBufferMemory(device, uniform_buffer, uniform_buffer_mem, 0);
+				}
+				assert!(res == vkrust::VkResult::VK_SUCCESS);
+
+
+				// Update uniform buffer
+				let projection = glm::ext::perspective(glm::radians(60.0), WIDTH as f32 / HEIGHT as f32, 0.01, 100.0);
+				let view = glm::ext::translate(&num::one(), glm::vec3(0.0, 0.0, -2.5));
+				let model: glm::Mat4 = num::one();
+				let mut ub_data = UniformBufferData {
+					projection_from_view: projection,
+					view_from_model: view,
+					world_from_model: model
+				};
+
+				unsafe {
+					let mut data: *mut libc::c_void = ptr::null_mut();
+					res = vkrust::vkMapMemory(device, uniform_buffer_mem, 0, mem_alloc.allocationSize, 0, &mut data);
+					assert!(res == vkrust::VkResult::VK_SUCCESS);
+					assert!(data != ptr::null_mut());
+					libc::memcpy(data, (&mut ub_data as *mut UniformBufferData) as *mut libc::c_void, std::mem::size_of::<UniformBufferData>() as libc::size_t);
+					vkrust::vkUnmapMemory(device, index_mem);
+				}
+			}
+
+			// Descriptor set layout
+			println!("Creating descriptor set layout");
+			let mut descriptor_set_layout: vkrust::VkDescriptorSetLayout = 0;
+			let mut pipeline_layout: vkrust::VkPipelineLayout = 0;
+			{
+				let dsl_binding = vkrust::VkDescriptorSetLayoutBinding {
+					binding: 0,
+					descriptorType: vkrust::VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+					descriptorCount: 1,
+					stageFlags: vkrust::VkShaderStageFlags::VK_SHADER_STAGE_VERTEX_BIT,
+					pImmutableSamplers: ptr::null()
+				};
+				let dsl_create_info = vkrust::VkDescriptorSetLayoutCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+					pNext: ptr::null(),
+					flags: vkrust::VkDescriptorSetLayoutCreateFlags::_EMPTY,
+					bindingCount: 1,
+					pBindings: &dsl_binding
+				};
+				unsafe {
+					res = vkrust::vkCreateDescriptorSetLayout(device, &dsl_create_info, ptr::null(), &mut descriptor_set_layout);
+				}
+				assert!(res == vkrust::VkResult::VK_SUCCESS);
+
+				let pl_create_info = vkrust::VkPipelineLayoutCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+					pNext: ptr::null(),
+					flags: 0,
+					setLayoutCount: 1,
+					pSetLayouts: &descriptor_set_layout,
+					pushConstantRangeCount: 0,
+					pPushConstantRanges: ptr::null()
+				};
+				unsafe {
+					res = vkrust::vkCreatePipelineLayout(device, &pl_create_info, ptr::null(), &mut pipeline_layout);
+				}
+				assert!(res == vkrust::VkResult::VK_SUCCESS);
+			}
+
+			// Pipelines
+			println!("Creating pipeline");
+			{
+			}
+
 			unsafe {
+				for i in 0..swapchain_image_count {
+					vkrust::vkDestroyFramebuffer(device, framebuffers[i as usize], ptr::null());
+				};
+				vkrust::vkDestroyRenderPass(device, render_pass, ptr::null());
+
 				vkrust::vkDestroyImage(device, ds_image, ptr::null());
 				vkrust::vkFreeMemory(device, ds_mem, ptr::null());
 				vkrust::vkDestroyImageView(device, ds_image_view, ptr::null());

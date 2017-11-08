@@ -146,6 +146,7 @@ fn main() {
 	let mut param_type = String::new();
 	let mut parameters = "".to_string();
 	let mut param_ptr = false;
+	let mut param_ptr_ptr = false;
 	let mut param_const = false;
 	let mut param_array = false;
 	let mut param_array_size = String::new();
@@ -464,6 +465,7 @@ fn main() {
 
 					param_const |= text.find("const").is_some();
 					param_ptr |= text.find("*").is_some();
+					param_ptr_ptr |= text.find("**").is_some();
 					if text.find("[").is_some() {
 						param_array = true;
 
@@ -520,21 +522,43 @@ fn main() {
 					},
 					b"param" => {
 						if matching_what[0] == "param" {
-							if param_array {
-								parameters.write_fmt(format_args!("{}: [{}{} {}; {}], ",
-									param_name,
-									if param_ptr { "*" } else { "" },
-									if param_const { if param_ptr { "const" } else { "" } } else { if param_ptr { "mut" } else { "" } },
-									param_type,
-									param_array_size)).expect("Could not format string");
+							if param_ptr_ptr {
+								if param_array {
+									parameters.write_fmt(format_args!("{}: [{}{}{}{} {}; {}], ",
+										param_name,
+										if param_ptr { "*" } else { "" },
+										if param_const { if param_ptr { "const" } else { "" } } else { if param_ptr { "mut" } else { "" } },
+										if param_ptr { "*" } else { "" },
+										if param_const { if param_ptr { "const" } else { "" } } else { if param_ptr { "mut" } else { "" } },
+										param_type,
+										param_array_size)).expect("Could not format string");
+								} else {
+									parameters.write_fmt(format_args!("{}: {}{}{}{} {}, ",
+										param_name,
+										if param_ptr { "*" } else { "" },
+										if param_const { if param_ptr { "const" } else { "" } } else { if param_ptr { "mut" } else { "" } },
+										if param_ptr { "*" } else { "" },
+										if param_const { if param_ptr { "const" } else { "" } } else { if param_ptr { "mut" } else { "" } },
+										param_type)).expect("Could not format string");
+								}
 							} else {
-								parameters.write_fmt(format_args!("{}: {}{} {}, ",
-									param_name,
-									if param_ptr { "*" } else { "" },
-									if param_const { if param_ptr { "const" } else { "" } } else { if param_ptr { "mut" } else { "" } },
-									param_type)).expect("Could not format string");
+								if param_array {
+									parameters.write_fmt(format_args!("{}: [{}{} {}; {}], ",
+										param_name,
+										if param_ptr { "*" } else { "" },
+										if param_const { if param_ptr { "const" } else { "" } } else { if param_ptr { "mut" } else { "" } },
+										param_type,
+										param_array_size)).expect("Could not format string");
+								} else {
+									parameters.write_fmt(format_args!("{}: {}{} {}, ",
+										param_name,
+										if param_ptr { "*" } else { "" },
+										if param_const { if param_ptr { "const" } else { "" } } else { if param_ptr { "mut" } else { "" } },
+										param_type)).expect("Could not format string");
+								}
 							}
 							param_ptr = false;
+							param_ptr_ptr = false;
 							param_const = false;
 							param_array = false;
 							param_array_size.clear();
@@ -621,9 +645,9 @@ pub const fn VK_VERSION_PATCH(version: u32) -> u32 {
 	let fluff2 = r#"
 
 #[allow(non_camel_case_types)]
-pub type VkDeviceSize = i64;
+pub type VkDeviceSize = u64;
 #[allow(non_camel_case_types)]
-pub type VkSampleMask = i32;
+pub type VkSampleMask = u32;
 
 #[allow(non_camel_case_types)]
 pub type PFN_vkAllocationFunction = *const c_void;
