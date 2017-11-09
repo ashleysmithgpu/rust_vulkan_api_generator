@@ -263,6 +263,12 @@ fn main() {
 			assert!(found_good_queue);
 			println!("Using queue index {}", graphics_and_present_queue_index);
 
+			let mut queue;
+			unsafe {
+				queue = std::mem::uninitialized();
+				vkrust::vkGetDeviceQueue(device, graphics_and_present_queue_index as u32, 0, &mut queue);
+			}
+
 			// Get a supported colour format and colour space
 			let mut format_count = 0;
 			unsafe {
@@ -1101,24 +1107,168 @@ fn main() {
 			println!("Creating descriptor pool");
 			let mut descriptor_pool: vkrust::VkDescriptorPool = 0;
 			{
+				let dtypes = vkrust::VkDescriptorPoolSize {
+					_type: vkrust::VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+					descriptorCount: 1
+				};
+				let pool_create_info = vkrust::VkDescriptorPoolCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+					pNext: ptr::null(),
+					flags: vkrust::VkDescriptorPoolCreateFlags::_EMPTY,
+					maxSets: 1,
+					poolSizeCount: 1,
+					pPoolSizes: &dtypes
+				};
+				unsafe {
+					res = vkrust::vkCreateDescriptorPool(device, &pool_create_info, ptr::null(), &mut descriptor_pool);
+				}
+				assert!(res == vkrust::VkResult::VK_SUCCESS);
 			}
 
 			// Descriptor set
 			println!("Creating descriptor set");
 			let mut descriptor_set: vkrust::VkDescriptorSet = 0;
 			{
+				let ds_alloc = vkrust::VkDescriptorSetAllocateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+					pNext: ptr::null(),
+					descriptorPool: descriptor_pool,
+					descriptorSetCount: 1,
+					pSetLayouts: &descriptor_set_layout
+				};
+				unsafe {
+					res = vkrust::vkAllocateDescriptorSets(device, &ds_alloc, &mut descriptor_set);
+				}
+				assert!(res == vkrust::VkResult::VK_SUCCESS);
+				let buffer_info = vkrust::VkDescriptorBufferInfo {
+					buffer: uniform_buffer,
+					offset: 0,
+					range: std::mem::size_of::<UniformBufferData>() as u64,
+				};
+				let write_ds = vkrust::VkWriteDescriptorSet {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+					pNext: ptr::null(),
+					dstSet: descriptor_set,
+					dstBinding: 0,
+					dstArrayElement: 0,
+					descriptorCount: 1,
+					descriptorType: vkrust::VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+					pImageInfo: ptr::null(),
+					pBufferInfo: &buffer_info,
+					pTexelBufferView: ptr::null()
+				};
+				unsafe {
+					vkrust::vkUpdateDescriptorSets(device, 1, &write_ds, 0, ptr::null());
+				}
 			}
 
 			// Buliding command buffers
 			println!("Building command buffers");
 			{
+				let begin_info = vkrust::VkCommandBufferBeginInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+					pNext: ptr::null(),
+					flags: vkrust::VkCommandBufferUsageFlags::_EMPTY,
+					pInheritanceInfo: ptr::null()
+				};
+				let clear_values = [
+					vkrust::VkClearValue { colour: vkrust::VkClearColorValue { float32: [0.0, 0.0, 0.2, 1.0] } },
+					vkrust::VkClearValue { depthStencil: vkrust::VkClearDepthStencilValue { depth: 1.0, stencil: 0 } },
+				];
+				let mut rp_begin_info = vkrust::VkRenderPassBeginInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+					pNext: ptr::null(),
+					renderPass: render_pass,
+					framebuffer: vkrust::VK_NULL_HANDLE,
+					renderArea: vkrust::VkRect2D {
+						offset: vkrust::VkOffset2D {
+							x: 0,
+							y: 0
+						},
+						extent: vkrust::VkExtent2D {
+							width: WIDTH,
+							height: HEIGHT
+						}
+					},
+					clearValueCount: 2,
+					pClearValues: clear_values.as_ptr()
+				};
+				for i in 0..swapchain_image_count {
+					rp_begin_info.framebuffer = framebuffers[i as usize];
+
+					unsafe {
+						res = vkrust::vkBeginCommandBuffer(command_buffers[i as usize], &begin_info);
+					}
+					assert!(res == vkrust::VkResult::VK_SUCCESS);
+					unsafe {
+						vkrust::vkCmdBeginRenderPass(command_buffers[i as usize], &rp_begin_info, vkrust::VkSubpassContents::VK_SUBPASS_CONTENTS_INLINE);
+					}
+					unsafe {
+						vkrust::vkCmdEndRenderPass(command_buffers[i as usize]);
+					}
+					unsafe {
+						vkrust::vkEndCommandBuffer(command_buffers[i as usize]);
+					}
+				}
 			}
 
 
+			let mut current_buffer = 0;
 			// Render loop
-			/*loop {
+			loop {
+				println!("vkAcquireNextImageKHR");
+				unsafe {
+					res = vkrust::vkAcquireNextImageKHR(device, swapchain, std::u64::MAX, present_complete_sem, vkrust::VK_NULL_HANDLE, &mut current_buffer);
+				}
+//				assert!(res == vkrust::VkResult::VK_SUCCESS);
+				println!("current_buffer {}", current_buffer);
 
-			}*/
+				println!("vkWaitForFences");
+				unsafe {
+					res = vkrust::vkWaitForFences(device, 1, &fences[current_buffer as usize], vkrust::VK_TRUE, std::u64::MAX);
+				}
+				//assert!(res == vkrust::VkResult::VK_SUCCESS);
+				println!("vkResetFences");
+				unsafe {
+					res = vkrust::vkResetFences(device, 1, &fences[current_buffer as usize]);
+				}
+				assert!(res == vkrust::VkResult::VK_SUCCESS);
+
+				let wait_stage_mask = vkrust::VkPipelineStageFlags::VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+				let submit_info = vkrust::VkSubmitInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_SUBMIT_INFO,
+					pNext: ptr::null(),
+					waitSemaphoreCount: 1,
+					pWaitSemaphores: &present_complete_sem,
+					pWaitDstStageMask: &wait_stage_mask,
+					commandBufferCount: 1,
+					pCommandBuffers: &command_buffers[current_buffer as usize],
+					signalSemaphoreCount: 1,
+					pSignalSemaphores: &render_complete_sem
+				};
+
+				println!("vkQueueSubmit");
+				unsafe {
+					vkrust::vkQueueSubmit(queue, 1, &submit_info, fences[current_buffer as usize]);
+				}
+
+				let mut result = vkrust::VkResult::VK_SUCCESS;
+				let mut image_indices = current_buffer;
+				let present_info = vkrust::VkPresentInfoKHR {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+					pNext: ptr::null(),
+					waitSemaphoreCount: 1,
+					pWaitSemaphores: &render_complete_sem,
+					swapchainCount: 1,
+					pSwapchains: &swapchain,
+					pImageIndices: &mut image_indices,
+					pResults: &mut result
+				};
+				println!("vkQueuePresentKHR");
+				unsafe {
+					vkrust::vkQueuePresentKHR(queue, &present_info);
+				}
+			}
 
 			unsafe {
 				for i in 0..swapchain_image_count {

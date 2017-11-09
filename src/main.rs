@@ -523,7 +523,7 @@ fn main() {
 						}
 					},
 					b"param" => {
-						if matching_what[0] == "param" {
+						if matching_what[0] == "param" && matching_what[1] == "command" {
 							if param_ptr_ptr {
 								if param_array {
 									parameters.write_fmt(format_args!("{}: [{}{}{}{} {}; {}], ",
@@ -576,11 +576,11 @@ fn main() {
 									handle_types.push(type_name.clone());
 								} else if type_category == "struct" && !struct_members.is_empty() {
 									structs.push((struct_name.clone(), struct_members.clone()));
-									struct_members.clear();
 								} else if type_category == "define" {
 									define_types.push((type_name.clone(), define_type_value.clone()));
 									define_type_value.clear();
 								}
+								struct_members.clear();
 							}
 						}
 					},
@@ -607,6 +607,7 @@ fn main() {
 	// TODO:
 	let fluff1 = r#"
 #![feature(const_fn)]
+#![feature(untagged_unions)]
 
 extern crate libc;
 
@@ -673,13 +674,16 @@ pub type VkBool32 = u32;
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub union VkClearColorValue {
-	col: f32
+	pub float32: [f32; 4],
+	pub int32: [i32; 4],
+	pub uint32: [u32; 4]
 }
 
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub union VkClearValue {
-	col: VkClearColorValue
+	pub colour: VkClearColorValue,
+	pub depthStencil: VkClearDepthStencilValue
 }"#;
 	{
 		use std::io::Write;
@@ -792,7 +796,7 @@ pub union VkClearValue {
 
 		// Print structs
 		for s in structs {
-			write!(output, "#[derive(Clone)]\n#[repr(C)]\npub struct {} {{\n{}\n}}\n", s.0, s.1).expect("Failed to write");
+			write!(output, "#[derive(Copy, Clone)]\n#[repr(C)]\npub struct {} {{\n{}\n}}\n", s.0, s.1).expect("Failed to write");
 		}
 
 		// Print functions
