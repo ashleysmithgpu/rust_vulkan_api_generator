@@ -20,6 +20,8 @@ fn guess_type_from_name(name: &String) -> String {
 	match name.as_ref() {
 		"VK_WHOLE_SIZE" => "u64".to_string(),
 		"VK_LOD_CLAMP_NONE" => "f32".to_string(),
+		"VK_TRUE" => "u32".to_string(),
+		"VK_FALSE" => "u32".to_string(),
 		_ => "usize".to_string()
 	}
 }
@@ -44,7 +46,7 @@ fn translate_types(original_type: String) -> String {
 		"char" => "u8".to_string(),
 		"uint8_t" => "u8".to_string(),
 		"float" => "f32".to_string(),
-		"VkBool32" => "bool".to_string(),
+		"VkBool32" => "VkBool32".to_string(),
 		_ => original_type.to_string()
 	}
 }
@@ -664,6 +666,9 @@ pub type PFN_vkDebugReportCallbackEXT = *const c_void;
 #[allow(non_camel_case_types)]
 pub type PFN_vkVoidFunction = *const c_void;
 
+// Rust assumes bool is u8, vulkan assumes it is u32
+pub type VkBool32 = u32;
+
 // TODO: how to do unions in rust?
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -757,7 +762,7 @@ pub union VkClearValue {
 
 			if b.values.len() > 0 {
 				write!(output, "bitflags! {{\n#[repr(C)]\n\tpub struct {}: u32 {{\n", b.name).expect("Failed to write");
-				write!(output, "\t\tconst _EMPTY = 0;").expect("Failed to write");
+				write!(output, "\t\tconst _EMPTY = 0;\n").expect("Failed to write");
 
 				for v in b.values {
 

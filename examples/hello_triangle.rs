@@ -11,6 +11,9 @@ extern crate xcb;
 
 use std::ptr;
 
+use std::io::prelude::*;
+use std::fs::File;
+
 const WIDTH: u32 = 800;
 const HEIGHT: u32 = 600;
 
@@ -57,6 +60,34 @@ fn create_wsi(instance: vkrust::vkrust::VkInstance) -> (xcb::Connection, u32, u6
 	(conn, win, surface)
 }
 
+fn load_spirv_shader_from_disk(device: vkrust::vkrust::VkDevice, filename: &str) -> Option<vkrust::vkrust::VkShaderModule> {
+
+	// Load file contents in to buffer
+	let mut f = File::open(filename).unwrap();
+	let mut buffer = Vec::new();
+	f.read_to_end(&mut buffer).unwrap();
+
+	let mut shader_mod: vkrust::vkrust::VkShaderModule = 0;
+
+	let mod_create_info = vkrust::vkrust::VkShaderModuleCreateInfo {
+		sType:  vkrust::vkrust::VkStructureType::VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+		pNext: ptr::null(),
+		flags: 0,
+		codeSize: buffer.len() as u64,
+		pCode: buffer.as_mut_ptr() as *mut u32
+	};
+
+	let res;
+	unsafe {
+		res = vkrust::vkrust::vkCreateShaderModule(device, &mod_create_info, ptr::null(), &mut shader_mod);
+	}
+	if res == vkrust::vkrust::VkResult::VK_SUCCESS {
+		Some(shader_mod)
+	} else {
+		None
+	}
+}
+
 fn get_memory_type(type_bits: u32, properties: vkrust::vkrust::VkMemoryPropertyFlags, device_memory_properties: &vkrust::vkrust::VkPhysicalDeviceMemoryProperties) -> Option<u32> {
 	let mut type_bits_mut = type_bits.clone();
 	for i in 0..device_memory_properties.memoryTypeCount {
@@ -78,15 +109,16 @@ fn main() {
 	let mut instance: vkrust::VkInstance = 0;
 	{
 		// Don't enable this layer here, it seems to break the lunarg code
-		/*let enabled_layers_rust = vec![
+		let enabled_layers_rust = vec![
 			"VK_LAYER_LUNARG_standard_validation".to_string(),
-		];*/
+		];
 		let enabled_extensions_rust = vec![
 			"VK_KHR_surface\0".to_string(),
 			"VK_KHR_xcb_surface\0".to_string()
 		];
 
 		let enabled_layers: Vec<*const u8> = vec![
+			enabled_layers_rust[0].as_ptr()
 		];
 		let enabled_extensions: Vec<*const u8> = vec![
 			enabled_extensions_rust[0].as_ptr(),
@@ -156,15 +188,15 @@ fn main() {
 
 	let mut device: vkrust::VkDevice = 0;
 	{
-		let enabled_layers_rust = vec![
+		/*let enabled_layers_rust = vec![
 			"VK_LAYER_LUNARG_standard_validation\0".to_string(),
-		];
+		];*/
 		let enabled_extensions_rust = vec![
 			"VK_KHR_swapchain\0".to_string()
 		];
 
 		let enabled_layers: Vec<*const u8> = vec![
-			enabled_layers_rust[0].as_ptr()
+		//	enabled_layers_rust[0].as_ptr()
 		];
 		let enabled_extensions: Vec<*const u8> = vec![
 			enabled_extensions_rust[0].as_ptr()
@@ -202,7 +234,7 @@ fn main() {
 			println!("Found {} queues:", queue_count);
 
 			let mut queue_props = Vec::<vkrust::VkQueueFamilyProperties>::with_capacity(queue_count as usize);
-			let mut queue_supports_present = Vec::<bool>::with_capacity(queue_count as usize);
+			let mut queue_supports_present = Vec::<vkrust::VkBool32>::with_capacity(queue_count as usize);
 			unsafe {
 				vkrust::vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &mut queue_count, queue_props.as_mut_ptr());
 				queue_props.set_len(queue_count as usize);
@@ -219,10 +251,10 @@ fn main() {
 				if !(prop.queueFlags & vkrust::VkQueueFlags::VK_QUEUE_GRAPHICS_BIT).is_empty() {
 					print!(" graphics, ");
 				}
-				if queue_supports_present[i as usize] {
+				if queue_supports_present[i as usize] > 0 {
 					print!(" present, ");
 				}
-				if !(prop.queueFlags & vkrust::VkQueueFlags::VK_QUEUE_GRAPHICS_BIT).is_empty() && queue_supports_present[i] {
+				if !(prop.queueFlags & vkrust::VkQueueFlags::VK_QUEUE_GRAPHICS_BIT).is_empty() && queue_supports_present[i] > 0 {
 					graphics_and_present_queue_index = i;
 					found_good_queue = true;
 				}
@@ -315,7 +347,7 @@ fn main() {
 				preTransform: swapchain_transform,
 				compositeAlpha: composite_alpha,
 				presentMode: present_mode,
-				clipped: true,
+				clipped: vkrust::VK_TRUE,
 				oldSwapchain: vkrust::VK_NULL_HANDLE
 			};
 
@@ -821,7 +853,7 @@ fn main() {
 					assert!(res == vkrust::VkResult::VK_SUCCESS);
 					assert!(data != ptr::null_mut());
 					libc::memcpy(data, (&mut ub_data as *mut UniformBufferData) as *mut libc::c_void, std::mem::size_of::<UniformBufferData>() as libc::size_t);
-					vkrust::vkUnmapMemory(device, index_mem);
+					vkrust::vkUnmapMemory(device, uniform_buffer_mem);
 				}
 			}
 
@@ -866,8 +898,227 @@ fn main() {
 
 			// Pipelines
 			println!("Creating pipeline");
+			let mut pipeline: vkrust::VkPipeline = 0;
+			{
+				let shader_entry_point = "main\0";
+				let shader_stages = [vkrust::VkPipelineShaderStageCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+					pNext: ptr::null(),
+					flags: 0,
+					stage: vkrust::VkShaderStageFlagBits::VK_SHADER_STAGE_VERTEX_BIT,
+					module: load_spirv_shader_from_disk(device, "triangle.vert.spv").unwrap(),
+					pName: shader_entry_point.as_ptr(),
+					pSpecializationInfo: ptr::null()
+				},
+				vkrust::VkPipelineShaderStageCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+					pNext: ptr::null(),
+					flags: 0,
+					stage: vkrust::VkShaderStageFlagBits::VK_SHADER_STAGE_FRAGMENT_BIT,
+					module: load_spirv_shader_from_disk(device, "triangle.frag.spv").unwrap(),
+					pName: shader_entry_point.as_ptr(),
+					pSpecializationInfo: ptr::null()
+				}];
+				let vertex_input_bindings = vkrust::VkVertexInputBindingDescription {
+					binding: 0,
+					stride: vertex_size as u32,
+					inputRate: vkrust::VkVertexInputRate::VK_VERTEX_INPUT_RATE_VERTEX
+				};
+				let vertex_input_attributes = [vkrust::VkVertexInputAttributeDescription {
+					location: 0,
+					binding: 0,
+					format: vkrust::VkFormat::VK_FORMAT_R32G32B32_SFLOAT,
+					offset: 0
+				},
+				vkrust::VkVertexInputAttributeDescription {
+					location: 1,
+					binding: 0,
+					format: vkrust::VkFormat::VK_FORMAT_R32G32B32_SFLOAT,
+					offset: 12 // TODO get this from somewhere
+				}];
+				let vertex_input = vkrust::VkPipelineVertexInputStateCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+					pNext: ptr::null(),
+					flags: 0,
+					vertexBindingDescriptionCount: 1,
+					pVertexBindingDescriptions: &vertex_input_bindings,
+					vertexAttributeDescriptionCount: 2,
+					pVertexAttributeDescriptions: vertex_input_attributes.as_ptr()
+				};
+				let input_assembly = vkrust::VkPipelineInputAssemblyStateCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+					pNext: ptr::null(),
+					flags: 0,
+					topology: vkrust::VkPrimitiveTopology::VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+					primitiveRestartEnable: vkrust::VK_FALSE
+				};
+				let viewports = vkrust::VkViewport {
+					x: 0.0,
+					y: 0.0,
+					width: WIDTH as f32,
+					height: HEIGHT as f32,
+					minDepth: 0.0,
+					maxDepth: 1.0
+				};
+				let scissors = vkrust::VkRect2D {
+					offset: vkrust::VkOffset2D {
+						x: 0,
+						y: 0
+					},
+					extent: vkrust::VkExtent2D {
+						width: WIDTH,
+						height: HEIGHT
+					}
+				};
+				let viewport = vkrust::VkPipelineViewportStateCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+					pNext: ptr::null(),
+					flags: 0,
+					viewportCount: 1,
+					pViewports: &viewports,
+					scissorCount: 1,
+					pScissors: &scissors
+				};
+
+				let rasterisation = vkrust::VkPipelineRasterizationStateCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+					pNext: ptr::null(),
+					flags: 0,
+					depthClampEnable: vkrust::VK_FALSE,
+					rasterizerDiscardEnable: vkrust::VK_FALSE,
+					polygonMode: vkrust::VkPolygonMode::VK_POLYGON_MODE_FILL,
+					cullMode: vkrust::VkCullModeFlags::VK_CULL_MODE_NONE,
+					frontFace: vkrust::VkFrontFace::VK_FRONT_FACE_COUNTER_CLOCKWISE,
+					depthBiasEnable: vkrust::VK_FALSE,
+					depthBiasConstantFactor: 0.0,
+					depthBiasClamp: 0.0,
+					depthBiasSlopeFactor: 0.0,
+					lineWidth: 1.0
+				};
+				let multisample = vkrust::VkPipelineMultisampleStateCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+					pNext: ptr::null(),
+					flags: 0,
+					rasterizationSamples: vkrust::VkSampleCountFlagBits::VK_SAMPLE_COUNT_1_BIT,
+					sampleShadingEnable: vkrust::VK_FALSE,
+					minSampleShading: 0.0,
+					pSampleMask: ptr::null(),
+					alphaToCoverageEnable: vkrust::VK_FALSE,
+					alphaToOneEnable: vkrust::VK_FALSE
+				};
+				let depth_stencil = vkrust::VkPipelineDepthStencilStateCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+					pNext: ptr::null(),
+					flags: 0,
+					depthTestEnable: vkrust::VK_TRUE,
+					depthWriteEnable: vkrust::VK_TRUE,
+					depthCompareOp: vkrust::VkCompareOp::VK_COMPARE_OP_LESS_OR_EQUAL,
+					depthBoundsTestEnable: vkrust::VK_FALSE,
+					stencilTestEnable: vkrust::VK_FALSE,
+					front: vkrust::VkStencilOpState {
+						failOp: vkrust::VkStencilOp::VK_STENCIL_OP_KEEP,
+						passOp: vkrust::VkStencilOp::VK_STENCIL_OP_KEEP,
+						depthFailOp: vkrust::VkStencilOp::VK_STENCIL_OP_KEEP,
+						compareOp: vkrust::VkCompareOp::VK_COMPARE_OP_ALWAYS,
+						compareMask: 0,
+						writeMask: 0,
+						reference: 0
+					},
+					back: vkrust::VkStencilOpState {
+						failOp: vkrust::VkStencilOp::VK_STENCIL_OP_KEEP,
+						passOp: vkrust::VkStencilOp::VK_STENCIL_OP_KEEP,
+						depthFailOp: vkrust::VkStencilOp::VK_STENCIL_OP_KEEP,
+						compareOp: vkrust::VkCompareOp::VK_COMPARE_OP_ALWAYS,
+						compareMask: 0,
+						writeMask: 0,
+						reference: 0
+					},
+					minDepthBounds: 0.0,
+					maxDepthBounds: 1.0
+				};
+				let blend_attachments = vkrust::VkPipelineColorBlendAttachmentState {
+					blendEnable: vkrust::VK_FALSE,
+					srcColorBlendFactor: vkrust::VkBlendFactor::VK_BLEND_FACTOR_ZERO,
+					dstColorBlendFactor: vkrust::VkBlendFactor::VK_BLEND_FACTOR_ZERO,
+					colorBlendOp: vkrust::VkBlendOp::VK_BLEND_OP_ADD ,
+					srcAlphaBlendFactor: vkrust::VkBlendFactor::VK_BLEND_FACTOR_ZERO,
+					dstAlphaBlendFactor: vkrust::VkBlendFactor::VK_BLEND_FACTOR_ZERO,
+					alphaBlendOp: vkrust::VkBlendOp::VK_BLEND_OP_ADD ,
+					colorWriteMask: vkrust::VkColorComponentFlags::all()
+				};
+
+				let colour_blend = vkrust::VkPipelineColorBlendStateCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+					pNext: ptr::null(),
+					flags: 0,
+					logicOpEnable: vkrust::VK_FALSE,
+					logicOp: vkrust::VkLogicOp::VK_LOGIC_OP_CLEAR,
+					attachmentCount: 1,
+					pAttachments: &blend_attachments,
+					blendConstants: [0.0, 0.0, 0.0, 0.0]
+				};
+				let dynamic_states = [
+					vkrust::VkDynamicState::VK_DYNAMIC_STATE_VIEWPORT,
+					vkrust::VkDynamicState::VK_DYNAMIC_STATE_VIEWPORT
+				];
+				let dynamic = vkrust::VkPipelineDynamicStateCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+					pNext: ptr::null(),
+					flags: 0,
+					dynamicStateCount: 1,
+					pDynamicStates: dynamic_states.as_ptr()
+				};
+
+				let pipeline_create_info = vkrust::VkGraphicsPipelineCreateInfo {
+					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+					pNext: ptr::null(),
+					flags: vkrust::VkPipelineCreateFlags::_EMPTY,
+					stageCount: shader_stages.len() as u32,
+					pStages: shader_stages.as_ptr(),
+					pVertexInputState: &vertex_input,
+					pInputAssemblyState: &input_assembly,
+					pTessellationState: ptr::null(),
+					pViewportState: &viewport,
+					pRasterizationState: &rasterisation,
+					pMultisampleState: &multisample,
+					pDepthStencilState: &depth_stencil,
+					pColorBlendState: &colour_blend,
+					pDynamicState: &dynamic,
+					layout: pipeline_layout,
+					renderPass: render_pass,
+					subpass: 0,
+					basePipelineHandle: vkrust::VK_NULL_HANDLE,
+					basePipelineIndex: 0
+				};
+
+				unsafe {
+					res = vkrust::vkCreateGraphicsPipelines(device, pipeline_cache, 1, &pipeline_create_info, ptr::null(), &mut pipeline);
+				}
+				assert!(res == vkrust::VkResult::VK_SUCCESS);
+			}
+
+			// Descriptor pool
+			println!("Creating descriptor pool");
+			let mut descriptor_pool: vkrust::VkDescriptorPool = 0;
 			{
 			}
+
+			// Descriptor set
+			println!("Creating descriptor set");
+			let mut descriptor_set: vkrust::VkDescriptorSet = 0;
+			{
+			}
+
+			// Buliding command buffers
+			println!("Building command buffers");
+			{
+			}
+
+
+			// Render loop
+			/*loop {
+
+			}*/
 
 			unsafe {
 				for i in 0..swapchain_image_count {
