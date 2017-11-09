@@ -37,7 +37,10 @@ fn create_wsi(instance: vkrust::vkrust::VkInstance) -> (xcb::Connection, u32, u6
 			WIDTH as u16, HEIGHT as u16,
 			0,
 			xcb::WINDOW_CLASS_INPUT_OUTPUT as u16,
-			screen.root_visual(), &vec![]
+			screen.root_visual(), &[
+				(xcb::CW_BACK_PIXEL, screen.white_pixel()),
+				(xcb::CW_EVENT_MASK, xcb::EVENT_MASK_EXPOSURE | xcb::EVENT_MASK_KEY_PRESS),
+			]
 		);
 		xcb::map_window(&conn, win);
 		conn.flush();
@@ -686,14 +689,14 @@ fn main() {
 			let use_staging = false;
 
 			// Vertex/index data
-			println!("Creating verticies/indicies");
+			println!("Creating verticies/indices");
 			let mut vertex_buffer: vkrust::VkBuffer = 0;
 			let num_vertices = 3;
 			let vertex_size = std::mem::size_of::<f32>() * 6;
 			let mut vertex_mem: vkrust::VkDeviceMemory = 0;
 
 			let mut index_buffer: vkrust::VkBuffer = 0;
-			let num_indicies = 3;
+			let num_indices = 3;
 			let index_size = std::mem::size_of::<u32>();
 			let mut index_mem: vkrust::VkDeviceMemory = 0;
 			{
@@ -703,7 +706,7 @@ fn main() {
 					0.0, -1.0, 0.0,	0.0, 0.0, 1.0
 				];
 
-				let indicies: [u32; 3] = [0, 1, 2];
+				let indices: [u32; 3] = [0, 1, 2];
 
 				if use_staging {
 					// TODO
@@ -755,7 +758,7 @@ fn main() {
 							sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
 							pNext: ptr::null(),
 							flags: vkrust::VkBufferCreateFlags::_EMPTY,
-							size: num_indicies * index_size as u64,
+							size: num_indices * index_size as u64,
 							usage: vkrust::VkBufferUsageFlags::VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
 							sharingMode: vkrust::VkSharingMode::VK_SHARING_MODE_EXCLUSIVE,
 							queueFamilyIndexCount: 0,
@@ -785,7 +788,7 @@ fn main() {
 							res = vkrust::vkMapMemory(device, index_mem, 0, mem_alloc.allocationSize, 0, &mut data);
 							assert!(res == vkrust::VkResult::VK_SUCCESS);
 							assert!(data != ptr::null_mut());
-							libc::memcpy(data, indicies.as_ptr() as *mut libc::c_void, (num_indicies as usize * index_size as usize) as libc::size_t);
+							libc::memcpy(data, indices.as_ptr() as *mut libc::c_void, (num_indices as usize * index_size as usize) as libc::size_t);
 							vkrust::vkUnmapMemory(device, index_mem);
 							res = vkrust::vkBindBufferMemory(device, index_buffer, index_mem, 0);
 						}
@@ -1203,6 +1206,46 @@ fn main() {
 					unsafe {
 						vkrust::vkCmdBeginRenderPass(command_buffers[i as usize], &rp_begin_info, vkrust::VkSubpassContents::VK_SUBPASS_CONTENTS_INLINE);
 					}
+					let vp = vkrust::VkViewport {
+						x: 0.0,
+						y: 0.0,
+						width: WIDTH as f32,
+						height: HEIGHT as f32,
+						minDepth: 0.0,
+						maxDepth: 1.0,
+					};
+					unsafe {
+						vkrust::vkCmdSetViewport(command_buffers[i as usize], 0, 1, &vp);
+					}
+					let sc = vkrust::VkRect2D {
+						offset: vkrust::VkOffset2D {
+							x: 0,
+							y: 0
+						},
+						extent: vkrust::VkExtent2D {
+							width: WIDTH,
+							height: HEIGHT
+						}
+					};
+					unsafe {
+						vkrust::vkCmdSetScissor(command_buffers[i as usize], 0, 1, &sc);
+					}
+					unsafe {
+						vkrust::vkCmdBindDescriptorSets(command_buffers[i as usize], vkrust::VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 0, 1, &descriptor_set, 0, ptr::null());
+					}
+					unsafe {
+						vkrust::vkCmdBindPipeline(command_buffers[i as usize], vkrust::VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+					}
+					let offset = 0;
+					unsafe {
+						vkrust::vkCmdBindVertexBuffers(command_buffers[i as usize], 0, 1, &vertex_buffer, &offset);
+					}
+					unsafe {
+						vkrust::vkCmdBindIndexBuffer(command_buffers[i as usize], index_buffer, 0, vkrust::VkIndexType::VK_INDEX_TYPE_UINT32);
+					}
+					unsafe {
+						vkrust::vkCmdDrawIndexed(command_buffers[i as usize], num_indices as u32, 1, 0, 0, 1);
+					}
 					unsafe {
 						vkrust::vkCmdEndRenderPass(command_buffers[i as usize]);
 					}
@@ -1214,25 +1257,54 @@ fn main() {
 
 
 			let mut current_buffer = 0;
+			let mut frame_index = 0;
 			// Render loop
 			loop {
+
+				println!("frame {}", frame_index);
+
+				let event = wsi_info.0.poll_for_event();
+				match event {
+					None => {}
+					Some(event) => {
+						println!("event");
+						let r = event.response_type() & !0x80;
+						match r {
+							xcb::EXPOSE => {
+								println!("expose");
+							},
+							xcb::KEY_PRESS => {
+								println!("key press");
+								let key_press : &xcb::KeyPressEvent = unsafe {
+									xcb::cast_event(&event)
+								};
+								println!("Key '{}' pressed", key_press.detail());
+								break;
+							},
+							_ => {}
+						}
+					}
+				}
+
 				println!("vkAcquireNextImageKHR");
 				unsafe {
 					res = vkrust::vkAcquireNextImageKHR(device, swapchain, std::u64::MAX, present_complete_sem, vkrust::VK_NULL_HANDLE, &mut current_buffer);
 				}
-//				assert!(res == vkrust::VkResult::VK_SUCCESS);
+				assert!(res == vkrust::VkResult::VK_SUCCESS);
 				println!("current_buffer {}", current_buffer);
 
-				println!("vkWaitForFences");
-				unsafe {
-					res = vkrust::vkWaitForFences(device, 1, &fences[current_buffer as usize], vkrust::VK_TRUE, std::u64::MAX);
+				if frame_index > 1 {
+					println!("vkWaitForFences");
+					unsafe {
+						res = vkrust::vkWaitForFences(device, 1, &fences[current_buffer as usize], vkrust::VK_TRUE, std::u64::MAX);
+					}
+					assert!(res == vkrust::VkResult::VK_SUCCESS);
+					println!("vkResetFences");
+					unsafe {
+						res = vkrust::vkResetFences(device, 1, &fences[current_buffer as usize]);
+					}
+					assert!(res == vkrust::VkResult::VK_SUCCESS);
 				}
-				//assert!(res == vkrust::VkResult::VK_SUCCESS);
-				println!("vkResetFences");
-				unsafe {
-					res = vkrust::vkResetFences(device, 1, &fences[current_buffer as usize]);
-				}
-				assert!(res == vkrust::VkResult::VK_SUCCESS);
 
 				let wait_stage_mask = vkrust::VkPipelineStageFlags::VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 				let submit_info = vkrust::VkSubmitInfo {
@@ -1268,6 +1340,7 @@ fn main() {
 				unsafe {
 					vkrust::vkQueuePresentKHR(queue, &present_info);
 				}
+				frame_index += 1;
 			}
 
 			unsafe {
