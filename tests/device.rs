@@ -24,7 +24,7 @@ enum VulkanParameter {
 */
 
 struct InstanceCreateInfo {
-	pub flags: i32,
+	pub flags: u32,
 	pub application_info: ApplicationInfo,
 	pub enabled_layers: vec::Vec<String>,
 	pub enabled_extensions: vec::Vec<String>,

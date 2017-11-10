@@ -60,9 +60,10 @@ fn main() {
 # Todo
 
 - [x] XML parsing
-- [ ] Unsafe raw interface
-- [ ] Safe interface
+- [x] Unsafe raw interface
 - [ ] Extension support
+- [ ] Function pointer loading
+- [ ] Safe interface
 - [ ] Loader implementation
 - [ ] Tests
 
