@@ -1,16 +1,12 @@
 
 extern crate vkrust;
-
 extern crate libc;
-
 extern crate glm;
 extern crate num;
-
 #[cfg(feature="xcb")]
 extern crate xcb;
 
 use std::ptr;
-
 use std::io::prelude::*;
 use std::fs::File;
 
@@ -111,29 +107,34 @@ fn main() {
 	let mut res: vkrust::VkResult;
 	let mut instance: vkrust::VkInstance = 0;
 	{
-		// Don't enable this layer here, it seems to break the lunarg code
 		let enabled_layers_rust = vec![
-			"VK_LAYER_LUNARG_standard_validation".to_string(),
+			std::ffi::CString::new("VK_LAYER_LUNARG_standard_validation").unwrap()
 		];
 		let enabled_extensions_rust = vec![
-			"VK_KHR_surface\0".to_string(),
-			"VK_KHR_xcb_surface\0".to_string()
+			std::ffi::CString::new("VK_KHR_surface").unwrap(),
+			std::ffi::CString::new("VK_KHR_xcb_surface").unwrap()
 		];
 
+#[cfg(debug_assertions)]
 		let enabled_layers: Vec<*const u8> = vec![
-			enabled_layers_rust[0].as_ptr()
+			enabled_layers_rust[0].as_ptr() as *const u8
+		];
+#[cfg(not(debug_assertions))]
+		let enabled_layers: Vec<*const u8> = vec![
 		];
 		let enabled_extensions: Vec<*const u8> = vec![
-			enabled_extensions_rust[0].as_ptr(),
-			enabled_extensions_rust[1].as_ptr()
+			enabled_extensions_rust[0].as_ptr() as *const u8,
+			enabled_extensions_rust[1].as_ptr() as *const u8
 		];
 
+		let app_name = std::ffi::CString::new("app name").unwrap();
+		let engine_name = std::ffi::CString::new("engine name").unwrap();
 		let application_info = vkrust::VkApplicationInfo {
 			sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_APPLICATION_INFO,
 			pNext: ptr::null(),
-			pApplicationName: "app name".as_ptr(),
+			pApplicationName: app_name.as_ptr() as *const u8,
 			applicationVersion: vkrust::VK_MAKE_VERSION(1,0,0),
-			pEngineName: "engine name".as_ptr(),
+			pEngineName: engine_name.as_ptr() as *const u8,
 			engineVersion: vkrust::VK_MAKE_VERSION(1,0,0),
 			apiVersion: vkrust::VK_MAKE_VERSION(1,0,0),
 		};
@@ -191,18 +192,14 @@ fn main() {
 
 	let mut device: vkrust::VkDevice = 0;
 	{
-		/*let enabled_layers_rust = vec![
-			"VK_LAYER_LUNARG_standard_validation\0".to_string(),
-		];*/
 		let enabled_extensions_rust = vec![
-			"VK_KHR_swapchain\0".to_string()
+			std::ffi::CString::new("VK_KHR_swapchain").unwrap()
 		];
 
 		let enabled_layers: Vec<*const u8> = vec![
-		//	enabled_layers_rust[0].as_ptr()
 		];
 		let enabled_extensions: Vec<*const u8> = vec![
-			enabled_extensions_rust[0].as_ptr()
+			enabled_extensions_rust[0].as_ptr() as *const u8
 		];
 		let device_create_info = vkrust::VkDeviceCreateInfo {
 			sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
@@ -388,7 +385,6 @@ fn main() {
 				let img_create_info = vkrust::VkImageViewCreateInfo {
 					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
 					pNext: ptr::null(),
-					//flags: vkrust::VkImageViewCreateFlags::_EMPTY,
 					flags: 0,
 					image: swapchain_images[i as usize],
 					viewType: vkrust::VkImageViewType::VK_IMAGE_VIEW_TYPE_2D,
@@ -804,13 +800,15 @@ fn main() {
 				world_from_model: glm::Mat4
 			};
 
-			println!("ubsz {}", std::mem::size_of::<UniformBufferData>());
-
 			// Uniform buffers
 			println!("Creating uniform buffers");
-			let mut uniform_buffer: vkrust::VkBuffer = 0;
-			let mut uniform_buffer_mem: vkrust::VkDeviceMemory = 0;
-			{
+			let mut uniform_buffers = Vec::<vkrust::VkBuffer>::with_capacity(swapchain_image_count as usize);
+			let mut uniform_buffers_mem = Vec::<vkrust::VkDeviceMemory>::with_capacity(swapchain_image_count as usize);
+			unsafe {
+				uniform_buffers.set_len(swapchain_image_count as usize);
+				uniform_buffers_mem.set_len(swapchain_image_count as usize);
+			}
+			for i in 0..swapchain_image_count {
 				let ub_create_info = vkrust::VkBufferCreateInfo {
 					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
 					pNext: ptr::null(),
@@ -823,14 +821,14 @@ fn main() {
 				};
 
 				unsafe {
-					res = vkrust::vkCreateBuffer(device, &ub_create_info, ptr::null(), &mut uniform_buffer);
+					res = vkrust::vkCreateBuffer(device, &ub_create_info, ptr::null(), &mut uniform_buffers[i as usize]);
 					assert!(res == vkrust::VkResult::VK_SUCCESS);
 				}
 
 				let mut mem_reqs: vkrust::VkMemoryRequirements;
 				unsafe {
 					mem_reqs = std::mem::uninitialized();
-					vkrust::vkGetBufferMemoryRequirements(device, uniform_buffer, &mut mem_reqs);
+					vkrust::vkGetBufferMemoryRequirements(device, uniform_buffers[i as usize], &mut mem_reqs);
 				}
 				let mem_alloc = vkrust::VkMemoryAllocateInfo {
 					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
@@ -839,9 +837,9 @@ fn main() {
 					memoryTypeIndex: get_memory_type(mem_reqs.memoryTypeBits, vkrust::VkMemoryPropertyFlagBits::VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | vkrust::VkMemoryPropertyFlagBits::VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &global_memory_properties).unwrap()
 				};
 				unsafe {
-					res = vkrust::vkAllocateMemory(device, &mem_alloc, ptr::null(), &mut uniform_buffer_mem);
+					res = vkrust::vkAllocateMemory(device, &mem_alloc, ptr::null(), &mut uniform_buffers_mem[i as usize]);
 					assert!(res == vkrust::VkResult::VK_SUCCESS);
-					res = vkrust::vkBindBufferMemory(device, uniform_buffer, uniform_buffer_mem, 0);
+					res = vkrust::vkBindBufferMemory(device, uniform_buffers[i as usize], uniform_buffers_mem[i as usize], 0);
 				}
 				assert!(res == vkrust::VkResult::VK_SUCCESS);
 
@@ -858,11 +856,11 @@ fn main() {
 
 				unsafe {
 					let mut data: *mut libc::c_void = ptr::null_mut();
-					res = vkrust::vkMapMemory(device, uniform_buffer_mem, 0, mem_alloc.allocationSize, 0, &mut data);
+					res = vkrust::vkMapMemory(device, uniform_buffers_mem[i as usize], 0, mem_alloc.allocationSize, 0, &mut data);
 					assert!(res == vkrust::VkResult::VK_SUCCESS);
 					assert!(data != ptr::null_mut());
 					libc::memcpy(data, (&mut ub_data as *mut UniformBufferData) as *mut libc::c_void, std::mem::size_of::<UniformBufferData>() as libc::size_t);
-					vkrust::vkUnmapMemory(device, uniform_buffer_mem);
+					vkrust::vkUnmapMemory(device, uniform_buffers_mem[i as usize]);
 				}
 			}
 
@@ -909,14 +907,14 @@ fn main() {
 			println!("Creating pipeline");
 			let mut pipeline: vkrust::VkPipeline = 0;
 			{
-				let shader_entry_point = "main\0";
+				let shader_entry_point = std::ffi::CString::new("main").unwrap();
 				let shader_stages = [vkrust::VkPipelineShaderStageCreateInfo {
 					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
 					pNext: ptr::null(),
 					flags: 0,
 					stage: vkrust::VkShaderStageFlagBits::VK_SHADER_STAGE_VERTEX_BIT,
 					module: load_spirv_shader_from_disk(device, "triangle.vert.spv").unwrap(),
-					pName: shader_entry_point.as_ptr(),
+					pName: shader_entry_point.as_ptr() as *const u8,
 					pSpecializationInfo: ptr::null()
 				},
 				vkrust::VkPipelineShaderStageCreateInfo {
@@ -925,7 +923,7 @@ fn main() {
 					flags: 0,
 					stage: vkrust::VkShaderStageFlagBits::VK_SHADER_STAGE_FRAGMENT_BIT,
 					module: load_spirv_shader_from_disk(device, "triangle.frag.spv").unwrap(),
-					pName: shader_entry_point.as_ptr(),
+					pName: shader_entry_point.as_ptr() as *const u8,
 					pSpecializationInfo: ptr::null()
 				}];
 				let vertex_input_bindings = vkrust::VkVertexInputBindingDescription {
@@ -1112,13 +1110,13 @@ fn main() {
 			{
 				let dtypes = vkrust::VkDescriptorPoolSize {
 					_type: vkrust::VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-					descriptorCount: 1
+					descriptorCount: swapchain_image_count
 				};
 				let pool_create_info = vkrust::VkDescriptorPoolCreateInfo {
 					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
 					pNext: ptr::null(),
 					flags: vkrust::VkDescriptorPoolCreateFlags::_EMPTY,
-					maxSets: 1,
+					maxSets: swapchain_image_count,
 					poolSizeCount: 1,
 					pPoolSizes: &dtypes
 				};
@@ -1128,40 +1126,44 @@ fn main() {
 				assert!(res == vkrust::VkResult::VK_SUCCESS);
 			}
 
-			// Descriptor set
-			println!("Creating descriptor set");
-			let mut descriptor_set: vkrust::VkDescriptorSet = 0;
+			// Descriptor sets
+			println!("Creating descriptor sets");
+			let mut descriptor_sets = Vec::<vkrust::VkDescriptorSet>::with_capacity(swapchain_image_count as usize);
 			{
+				let set_layouts = vec![descriptor_set_layout; swapchain_image_count as usize];
 				let ds_alloc = vkrust::VkDescriptorSetAllocateInfo {
 					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
 					pNext: ptr::null(),
 					descriptorPool: descriptor_pool,
-					descriptorSetCount: 1,
-					pSetLayouts: &descriptor_set_layout
+					descriptorSetCount: swapchain_image_count,
+					pSetLayouts: set_layouts.as_ptr()
 				};
 				unsafe {
-					res = vkrust::vkAllocateDescriptorSets(device, &ds_alloc, &mut descriptor_set);
+					descriptor_sets.set_len(swapchain_image_count as usize);
+					res = vkrust::vkAllocateDescriptorSets(device, &ds_alloc, descriptor_sets.as_mut_ptr());
 				}
 				assert!(res == vkrust::VkResult::VK_SUCCESS);
-				let buffer_info = vkrust::VkDescriptorBufferInfo {
-					buffer: uniform_buffer,
-					offset: 0,
-					range: std::mem::size_of::<UniformBufferData>() as u64,
-				};
-				let write_ds = vkrust::VkWriteDescriptorSet {
-					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-					pNext: ptr::null(),
-					dstSet: descriptor_set,
-					dstBinding: 0,
-					dstArrayElement: 0,
-					descriptorCount: 1,
-					descriptorType: vkrust::VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-					pImageInfo: ptr::null(),
-					pBufferInfo: &buffer_info,
-					pTexelBufferView: ptr::null()
-				};
-				unsafe {
-					vkrust::vkUpdateDescriptorSets(device, 1, &write_ds, 0, ptr::null());
+				for i in 0..swapchain_image_count {
+					let buffer_info = vkrust::VkDescriptorBufferInfo {
+						buffer: uniform_buffers[i as usize],
+						offset: 0,
+						range: std::mem::size_of::<UniformBufferData>() as u64,
+					};
+					let write_ds = vkrust::VkWriteDescriptorSet {
+						sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+						pNext: ptr::null(),
+						dstSet: descriptor_sets[i as usize],
+						dstBinding: 0,
+						dstArrayElement: 0,
+						descriptorCount: 1,
+						descriptorType: vkrust::VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+						pImageInfo: ptr::null(),
+						pBufferInfo: &buffer_info,
+						pTexelBufferView: ptr::null()
+					};
+					unsafe {
+						vkrust::vkUpdateDescriptorSets(device, 1, &write_ds, 0, ptr::null());
+					}
 				}
 			}
 
@@ -1227,29 +1229,15 @@ fn main() {
 							height: HEIGHT
 						}
 					};
-					unsafe {
-						vkrust::vkCmdSetScissor(command_buffers[i as usize], 0, 1, &sc);
-					}
-					unsafe {
-						vkrust::vkCmdBindDescriptorSets(command_buffers[i as usize], vkrust::VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 0, 1, &descriptor_set, 0, ptr::null());
-					}
-					unsafe {
-						vkrust::vkCmdBindPipeline(command_buffers[i as usize], vkrust::VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-					}
 					let offset = 0;
 					unsafe {
+						vkrust::vkCmdSetScissor(command_buffers[i as usize], 0, 1, &sc);
+						vkrust::vkCmdBindDescriptorSets(command_buffers[i as usize], vkrust::VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 0, 1, &descriptor_sets[(i % 2) as usize], 0, ptr::null());
+						vkrust::vkCmdBindPipeline(command_buffers[i as usize], vkrust::VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 						vkrust::vkCmdBindVertexBuffers(command_buffers[i as usize], 0, 1, &vertex_buffer, &offset);
-					}
-					unsafe {
 						vkrust::vkCmdBindIndexBuffer(command_buffers[i as usize], index_buffer, 0, vkrust::VkIndexType::VK_INDEX_TYPE_UINT32);
-					}
-					unsafe {
 						vkrust::vkCmdDrawIndexed(command_buffers[i as usize], num_indices as u32, 1, 0, 0, 1);
-					}
-					unsafe {
 						vkrust::vkCmdEndRenderPass(command_buffers[i as usize]);
-					}
-					unsafe {
 						vkrust::vkEndCommandBuffer(command_buffers[i as usize]);
 					}
 				}
@@ -1258,6 +1246,9 @@ fn main() {
 
 			let mut current_buffer = 0;
 			let mut frame_index = 0;
+
+			let mut rotation = 0.0;
+
 			// Render loop
 			loop {
 
@@ -1306,6 +1297,31 @@ fn main() {
 					assert!(res == vkrust::VkResult::VK_SUCCESS);
 				}
 
+
+				// Per frame logic
+				// TODO: index returned from vkAcquireNextImageKHR may not be sequential
+				// need to allocate uniform buffers[num swapchain images][num frames in flight at once]
+				{
+					let projection = glm::ext::perspective(glm::radians(60.0), WIDTH as f32 / HEIGHT as f32, 0.01, 100.0);
+					let view = glm::ext::translate(&num::one(), glm::vec3(0.0, 0.0, -2.5));
+					let model: glm::Mat4 = glm::ext::rotate(&num::one(), rotation, glm::vec3(0.0, 0.0, 1.0));
+					let mut ub_data = UniformBufferData {
+						projection_from_view: projection,
+						view_from_model: view,
+						world_from_model: model
+					};
+					rotation += 0.01;
+
+					unsafe {
+						let mut data: *mut libc::c_void = ptr::null_mut();
+						res = vkrust::vkMapMemory(device, uniform_buffers_mem[current_buffer as usize], 0, std::mem::size_of::<UniformBufferData>() as u64, 0, &mut data);
+						assert!(res == vkrust::VkResult::VK_SUCCESS);
+						assert!(data != ptr::null_mut());
+						libc::memcpy(data, (&mut ub_data as *mut UniformBufferData) as *mut libc::c_void, std::mem::size_of::<UniformBufferData>() as libc::size_t);
+						vkrust::vkUnmapMemory(device, uniform_buffers_mem[current_buffer as usize]);
+					}
+				}
+
 				let wait_stage_mask = vkrust::VkPipelineStageFlags::VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 				let submit_info = vkrust::VkSubmitInfo {
 					sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -1344,6 +1360,8 @@ fn main() {
 			}
 
 			unsafe {
+				vkrust::vkDeviceWaitIdle(device);
+
 				for i in 0..swapchain_image_count {
 					vkrust::vkDestroyFramebuffer(device, framebuffers[i as usize], ptr::null());
 				};
