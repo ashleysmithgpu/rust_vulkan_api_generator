@@ -610,19 +610,16 @@ fn main() {
 #![feature(untagged_unions)]
 
 extern crate libc;
-
 #[macro_use]
 extern crate bitflags;
-
 extern crate xcb;
 
 pub mod vkrust {
 #![allow(non_snake_case)]
 
 use xcb::ffi;
-
-use libc::{/*c_int,*/ c_void};
-//use std::ptr;
+use std::mem;
+use libc::{c_void};
 
 pub const VK_VERSION_1_0: u32 = 1;
 
@@ -823,8 +820,12 @@ pub union VkClearValue {
 			}
 		}
 
+		write!(output, "}}\n").expect("Failed to write");
+
 		// Print extension functions
-		write!(output, "\n\t// Extensions\n\n").expect("Failed to write");
+		write!(output, "\n\t// Extensions\n").expect("Failed to write");
+
+		write!(output, "\tpub struct VulkanFunctionPointers {{\n").expect("Failed to write");
 
 		for ext in &extensions {
 
@@ -837,10 +838,10 @@ pub union VkClearValue {
 						ExtensionNewType::Command(ref name) => {
 							if let Some(cmd) = commands.get(name) {
 								if once {
-									write!(output, "\n\t// {}\n", ext.name).expect("Failed to write");
+									write!(output, "\n\t\t// {}\n", ext.name).expect("Failed to write");
 									once = false;
 								}
-								write!(output, "\tpub fn {}({}) -> {};\n", name, cmd.0, cmd.1).expect("Failed to write");
+								write!(output, "\t\tpub {}: Option<extern \"C\" fn({}) -> {}>,\n", name.replace("vk", ""), cmd.0, cmd.1).expect("Failed to write");
 							}
 						},
 						_ => ()
@@ -849,7 +850,35 @@ pub union VkClearValue {
 			}
 		}
 
-		write!(output, "}}\n").expect("Failed to write");
+
+
+		write!(output, "\t}}\n\timpl VulkanFunctionPointers {{\n\t\tpub fn new(instance: VkInstance) -> VulkanFunctionPointers {{\n\t\t\tVulkanFunctionPointers {{\n").expect("Failed to write");
+
+		for ext in &extensions {
+
+			if ext.supported != "disabled" {
+
+				let mut once = true;
+				for ext_cmd in &ext.types {
+
+					match *ext_cmd {
+						ExtensionNewType::Command(ref name) => {
+							if let Some(cmd) = commands.get(name) {
+								if once {
+									write!(output, "\n\t\t// {}\n", ext.name).expect("Failed to write");
+									once = false;
+								}
+								write!(output, "\t\t\t{}: unsafe {{ mem::transmute::<*const c_void,Option<extern \"C\" fn({}) -> {}>>(vkGetInstanceProcAddr(instance, \"{}\\0\".as_ptr())) }},\n", name.replace("vk", ""), cmd.0, cmd.1, name).expect("Failed to write");
+							}
+						},
+						_ => ()
+					}
+				}
+			}
+		}
+
+		write!(output, "}}\n\t\t}}\n\t}}\n").expect("Failed to write");
+
 		write!(output, "}}\n").expect("Failed to write");
 	}
 }
