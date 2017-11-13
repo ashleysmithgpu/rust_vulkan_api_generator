@@ -49,11 +49,8 @@ fn create_wsi(instance: vkrust::vkrust::VkInstance, vk: &vkrust::vkrust::VulkanF
 			window: win
 		};
 
-		let res;
-		unsafe {
-			assert!(vk.CreateXcbSurfaceKHR.is_some());
-			res = vk.CreateXcbSurfaceKHR.unwrap()(instance, &surface_create_info, ptr::null(), &mut surface);
-		}
+		assert!(vk.CreateXcbSurfaceKHR.is_some());
+		let res = vk.CreateXcbSurfaceKHR.unwrap()(instance, &surface_create_info, ptr::null(), &mut surface);
 		assert!(res == vkrust::vkrust::VkResult::VK_SUCCESS);
 	}
 
@@ -158,9 +155,8 @@ fn main() {
 	assert!(instance != vkrust::VK_NULL_HANDLE);
 	assert!(res == vkrust::VkResult::VK_SUCCESS);
 
-
+	// This will load all of the extension function pointers that we know about
 	let vk = vkrust::VulkanFunctionPointers::new(instance);
-
 
 	let mut num_physical_devices = 0;
 
@@ -249,10 +245,8 @@ fn main() {
 			let mut found_good_queue = false;
 			for (i,prop) in queue_props.iter().enumerate() {
 				print!(" Queue {} supports: ", i);
-				unsafe {
-					assert!(vk.GetPhysicalDeviceSurfaceSupportKHR.is_some());
-					vk.GetPhysicalDeviceSurfaceSupportKHR.unwrap()(physical_device, i as u32, wsi_info.2, &mut queue_supports_present[i as usize]);
-				}
+				assert!(vk.GetPhysicalDeviceSurfaceSupportKHR.is_some());
+				vk.GetPhysicalDeviceSurfaceSupportKHR.unwrap()(physical_device, i as u32, wsi_info.2, &mut queue_supports_present[i as usize]);
 				if !(prop.queueFlags & vkrust::VkQueueFlags::VK_QUEUE_GRAPHICS_BIT).is_empty() {
 					print!(" graphics, ");
 				}
@@ -276,19 +270,17 @@ fn main() {
 
 			// Get a supported colour format and colour space
 			let mut format_count = 0;
-			unsafe {
-				assert!(vk.GetPhysicalDeviceSurfaceFormatsKHR.is_some());
-				vk.GetPhysicalDeviceSurfaceFormatsKHR.unwrap()(physical_device, wsi_info.2, &mut format_count, ptr::null_mut());
-			}
+			assert!(vk.GetPhysicalDeviceSurfaceFormatsKHR.is_some());
+			vk.GetPhysicalDeviceSurfaceFormatsKHR.unwrap()(physical_device, wsi_info.2, &mut format_count, ptr::null_mut());
 			assert!(format_count > 0);
 			println!("Found {} surface formats", format_count);
 
 			let mut surface_formats = Vec::<vkrust::VkSurfaceFormatKHR>::with_capacity(format_count as usize);
 			unsafe {
 				surface_formats.set_len(format_count as usize);
-				assert!(vk.GetPhysicalDeviceSurfaceFormatsKHR.is_some());
-				vk.GetPhysicalDeviceSurfaceFormatsKHR.unwrap()(physical_device, wsi_info.2, &mut format_count, surface_formats.as_mut_ptr());
 			}
+			assert!(vk.GetPhysicalDeviceSurfaceFormatsKHR.is_some());
+			vk.GetPhysicalDeviceSurfaceFormatsKHR.unwrap()(physical_device, wsi_info.2, &mut format_count, surface_formats.as_mut_ptr());
 
 			let mut colour_format = vkrust::VkFormat::VK_FORMAT_B8G8R8A8_UNORM;
 			let mut colour_space = vkrust::VkColorSpaceKHR::VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
@@ -318,22 +310,20 @@ fn main() {
 			let mut surface_capabilities: vkrust::VkSurfaceCapabilitiesKHR;
 			unsafe {
 				surface_capabilities = std::mem::uninitialized();
-				assert!(vk.GetPhysicalDeviceSurfaceCapabilitiesKHR.is_some());
-				vk.GetPhysicalDeviceSurfaceCapabilitiesKHR.unwrap()(physical_device, wsi_info.2, &mut surface_capabilities);
 			}
+			assert!(vk.GetPhysicalDeviceSurfaceCapabilitiesKHR.is_some());
+			vk.GetPhysicalDeviceSurfaceCapabilitiesKHR.unwrap()(physical_device, wsi_info.2, &mut surface_capabilities);
 
 			let mut present_mode_count = 0;
-			unsafe {
-				assert!(vk.GetPhysicalDeviceSurfacePresentModesKHR.is_some());
-				vk.GetPhysicalDeviceSurfacePresentModesKHR.unwrap()(physical_device, wsi_info.2, &mut present_mode_count, ptr::null_mut());
-			}
+			assert!(vk.GetPhysicalDeviceSurfacePresentModesKHR.is_some());
+			vk.GetPhysicalDeviceSurfacePresentModesKHR.unwrap()(physical_device, wsi_info.2, &mut present_mode_count, ptr::null_mut());
 			assert!(present_mode_count > 0);
 			let mut present_modes = Vec::<vkrust::VkPresentModeKHR>::with_capacity(present_mode_count as usize);
 			unsafe {
 				present_modes.set_len(present_mode_count as usize);
-				assert!(vk.GetPhysicalDeviceSurfacePresentModesKHR.is_some());
-				vk.GetPhysicalDeviceSurfacePresentModesKHR.unwrap()(physical_device, wsi_info.2, &mut present_mode_count, present_modes.as_mut_ptr());
 			}
+			assert!(vk.GetPhysicalDeviceSurfacePresentModesKHR.is_some());
+			vk.GetPhysicalDeviceSurfacePresentModesKHR.unwrap()(physical_device, wsi_info.2, &mut present_mode_count, present_modes.as_mut_ptr());
 
 			println!("Found {} present modes", present_mode_count);
 
@@ -369,26 +359,22 @@ fn main() {
 
 			let mut swapchain: vkrust::VkSwapchainKHR = 0;
 			{
-				unsafe {
-					assert!(vk.CreateSwapchainKHR.is_some());
-					res = vk.CreateSwapchainKHR.unwrap()(device, &swapchain_create_info, ptr::null(), &mut swapchain);
-				}
+				assert!(vk.CreateSwapchainKHR.is_some());
+				res = vk.CreateSwapchainKHR.unwrap()(device, &swapchain_create_info, ptr::null(), &mut swapchain);
 				assert!(res == vkrust::VkResult::VK_SUCCESS);
 			}
 
 			let mut swapchain_image_count = 0;
-			unsafe {
-				assert!(vk.GetSwapchainImagesKHR.is_some());
-				vk.GetSwapchainImagesKHR.unwrap()(device, swapchain, &mut swapchain_image_count, ptr::null_mut());
-			}
+			assert!(vk.GetSwapchainImagesKHR.is_some());
+			vk.GetSwapchainImagesKHR.unwrap()(device, swapchain, &mut swapchain_image_count, ptr::null_mut());
 			assert!(swapchain_image_count > 0);
 			println!("Creating {} swapchain images", swapchain_image_count);
 			let mut swapchain_images = Vec::<vkrust::VkImage>::with_capacity(swapchain_image_count as usize);
 			unsafe {
 				swapchain_images.set_len(swapchain_image_count as usize);
-				assert!(vk.GetSwapchainImagesKHR.is_some());
-				vk.GetSwapchainImagesKHR.unwrap()(device, swapchain, &mut swapchain_image_count, swapchain_images.as_mut_ptr());
 			}
+			assert!(vk.GetSwapchainImagesKHR.is_some());
+			vk.GetSwapchainImagesKHR.unwrap()(device, swapchain, &mut swapchain_image_count, swapchain_images.as_mut_ptr());
 
 			let mut swapchain_image_views = Vec::<vkrust::VkImageView>::with_capacity(swapchain_image_count as usize);
 			unsafe {
@@ -742,7 +728,7 @@ fn main() {
 							mem_reqs = std::mem::uninitialized();
 							vkrust::vkGetBufferMemoryRequirements(device, vertex_buffer, &mut mem_reqs);
 						}
-						let mut mem_alloc = vkrust::VkMemoryAllocateInfo {
+						let mem_alloc = vkrust::VkMemoryAllocateInfo {
 							sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
 							pNext: ptr::null(),
 							allocationSize: mem_reqs.size,
@@ -1291,10 +1277,8 @@ fn main() {
 				}
 
 				println!("vkAcquireNextImageKHR");
-				unsafe {
-					assert!(vk.AcquireNextImageKHR.is_some());
-					res = vk.AcquireNextImageKHR.unwrap()(device, swapchain, std::u64::MAX, present_complete_sem, vkrust::VK_NULL_HANDLE, &mut current_buffer);
-				}
+				assert!(vk.AcquireNextImageKHR.is_some());
+				res = vk.AcquireNextImageKHR.unwrap()(device, swapchain, std::u64::MAX, present_complete_sem, vkrust::VK_NULL_HANDLE, &mut current_buffer);
 				assert!(res == vkrust::VkResult::VK_SUCCESS);
 				println!("current_buffer {}", current_buffer);
 
@@ -1367,10 +1351,8 @@ fn main() {
 					pResults: &mut result
 				};
 				println!("vkQueuePresentKHR");
-				unsafe {
-					assert!(vk.QueuePresentKHR.is_some());
-					vk.QueuePresentKHR.unwrap()(queue, &present_info);
-				}
+				assert!(vk.QueuePresentKHR.is_some());
+				vk.QueuePresentKHR.unwrap()(queue, &present_info);
 				frame_index += 1;
 			}
 
@@ -1391,14 +1373,12 @@ fn main() {
 				for i in 0..swapchain_image_count {
 					vkrust::vkDestroyImageView(device, swapchain_image_views[i as usize], ptr::null());
 				}
-				assert!(vk.DestroySwapchainKHR.is_some());
-				vk.DestroySwapchainKHR.unwrap()(device, swapchain, ptr::null());
 			}
+			assert!(vk.DestroySwapchainKHR.is_some());
+			vk.DestroySwapchainKHR.unwrap()(device, swapchain, ptr::null());
 		}
-		unsafe {
-			assert!(vk.DestroySurfaceKHR.is_some());
-			vk.DestroySurfaceKHR.unwrap()(instance, wsi_info.2, ptr::null());
-		}
+		assert!(vk.DestroySurfaceKHR.is_some());
+		vk.DestroySurfaceKHR.unwrap()(instance, wsi_info.2, ptr::null());
 	}
 
 	unsafe {

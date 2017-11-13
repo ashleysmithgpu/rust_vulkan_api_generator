@@ -26,12 +26,21 @@ fn guess_type_from_name(name: &String) -> String {
 	}
 }
 
-fn c_wsi_types_to_rust_types(type_name: String) -> String {
+fn c_wsi_types_to_rust_types(type_name: &String) -> String {
 	match type_name.as_ref() {
-		"xcb_connection_t" => "pub type xcb_connection_t = ffi::xcb_connection_t;".to_string(),
-//		"xcb_visualid_t " => "pub xcb_visualid_t = ffi::xcb_connection_t;".to_string(),
+		"xcb_connection_t" => "pub type xcb_connection_t = xcb::ffi::xcb_connection_t;".to_string(),
+//		"xcb_visualid_t " => "pub xcb_visualid_t = xcb::ffi::xcb_connection_t;".to_string(),
 		"xcb_window_t" => "pub type xcb_window_t = u32;".to_string(),
 		_ => format!("pub type {} = u64;", type_name.to_string())
+	}
+}
+
+fn c_wsi_types_to_cfg_var(type_name: &String) -> String {
+	match type_name.as_ref() {
+		"xcb_connection_t" => "xcb".to_string(),
+		"xcb_visualid_t " => "xcb".to_string(),
+		"xcb_window_t" => "xcb".to_string(),
+		_ => "".to_string()
 	}
 }
 
@@ -612,14 +621,15 @@ fn main() {
 extern crate libc;
 #[macro_use]
 extern crate bitflags;
-extern crate xcb;
 
 pub mod vkrust {
 #![allow(non_snake_case)]
 
-use xcb::ffi;
 use std::mem;
 use libc::{c_void};
+
+#[cfg(feature="xcb")]
+extern crate xcb;
 
 pub const VK_VERSION_1_0: u32 = 1;
 
@@ -707,7 +717,12 @@ pub union VkClearValue {
 
 		// Print typedefs
 		for t in types {
-			write!(output, "#[allow(non_camel_case_types)]\n{}\n", c_wsi_types_to_rust_types(t)).expect("Failed to write");
+			let cfg = c_wsi_types_to_cfg_var(&t);
+			if cfg.is_empty() {
+				write!(output, "#[allow(non_camel_case_types)]\n{}\n", c_wsi_types_to_rust_types(&t)).expect("Failed to write");
+			} else {
+				write!(output, "#[allow(non_camel_case_types)]\n#[cfg(feature=\"{}\")]\n{}\n", cfg, c_wsi_types_to_rust_types(&t)).expect("Failed to write");
+			}
 		}
 		for t in bitmask_types {
 			if t.1.is_empty() {
@@ -852,7 +867,7 @@ pub union VkClearValue {
 
 
 
-		write!(output, "\t}}\n\timpl VulkanFunctionPointers {{\n\t\tpub fn new(instance: VkInstance) -> VulkanFunctionPointers {{\n\t\t\tVulkanFunctionPointers {{\n").expect("Failed to write");
+		write!(output, "\t}}\n\n\timpl VulkanFunctionPointers {{\n\t\tpub fn new(instance: VkInstance) -> VulkanFunctionPointers {{\n\t\t\tVulkanFunctionPointers {{\n").expect("Failed to write");
 
 		for ext in &extensions {
 
@@ -865,7 +880,7 @@ pub union VkClearValue {
 						ExtensionNewType::Command(ref name) => {
 							if let Some(cmd) = commands.get(name) {
 								if once {
-									write!(output, "\n\t\t// {}\n", ext.name).expect("Failed to write");
+									write!(output, "\n\t\t\t// {}\n", ext.name).expect("Failed to write");
 									once = false;
 								}
 								write!(output, "\t\t\t{}: unsafe {{ mem::transmute::<*const c_void,Option<extern \"C\" fn({}) -> {}>>(vkGetInstanceProcAddr(instance, \"{}\\0\".as_ptr())) }},\n", name.replace("vk", ""), cmd.0, cmd.1, name).expect("Failed to write");
