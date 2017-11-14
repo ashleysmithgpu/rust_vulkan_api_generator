@@ -60,6 +60,26 @@ fn main() {
 }
 ```
 
+vk is a wrapped, safe interface to vulkan in rust.
+
+I.e.
+```rust
+extern crate vk;
+
+use vk::*;
+
+fn main() {
+	let instance = vk::Instance::new("my app",
+#[cfg(debug_assertions)]
+		vec!["VK_LAYER_LUNARG_standard_validation".to_string()],
+#[cfg(not(debug_assertions))]
+		vec![],
+		vec!["VK_KHR_surface".to_string(), "VK_KHR_xcb_surface".to_string()]);
+
+	instance.expect("Failed to create instance");
+}
+```
+
 # Todo
 
 - [x] XML parsing

@@ -1,0 +1,27 @@
+[package]
+name = "vk"
+version = "0.0.1"
+authors = ["Ashley Smith <ashleysmithgpu@gmail.com>"]
+description = "Wrapped interface to Vulkan in rust"
+repository = "https://github.com/ashleysmithgpu/rust_vulkan_api_generator"
+keywords = ["vulkan"]
+
+[features]
+default = ["xcb"]
+
+[dependencies]
+libc = "0.2.24"
+bitflags = "1.0"
+vkraw = { path = "../vkraw", version = "0.0.1" }
+
+xcb = { version = "0.8", optional = true }
+
+[dev-dependencies]
+glm = "0.2.3"
+num = "0.1.36"
+
+# TODO: need to build the bin target first, cargo does not support this
+
+[lib]
+name = "vk"
+path = "src/lib.rs"
