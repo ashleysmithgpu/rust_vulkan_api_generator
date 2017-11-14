@@ -13,10 +13,11 @@ default = ["xcb"]
 libc = "0.2.24"
 bitflags = "1.0"
 
+xcb = { version = "0.8", optional = true }
+
+[dev-dependencies]
 glm = "0.2.3"
 num = "0.1.36"
-
-xcb = { version = "0.8", optional = true }
 
 # TODO: need to build the bin target first, cargo does not support this
 

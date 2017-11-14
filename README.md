@@ -1,6 +1,6 @@
 # vkrust
 
-This library exposes an unsafe Vulkan interface that mirrors the C interface in rust. It will also expose a safe interface that wraps the unsafe operations as much as possible and handles lifetimes of Vulkan objects.
+This project generates an unsafe Vulkan interface that mirrors the C interface in rust from a vk.xml. It will also expose a safe interface that wraps the unsafe operations as much as possible and handles lifetimes of Vulkan objects.
 
 ## Note
 
@@ -8,37 +8,36 @@ This is my attempt to learn rust... You probably don't want to use this code yet
 
 # How to use
 
-Binary to convert the vulkan vk.xml file to an API usable in rust.
+vkgen is a binary to convert the vulkan vk.xml file to an API usable in rust.
 
 I.e.
 ```bash
-touch src/lib.rs
+cd vkgen
 wget https://raw.githubusercontent.com/KhronosGroup/Vulkan-LoaderAndValidationLayers/master/scripts/vk.xml
 cargo build
-target/debug/rust_vulkan_api_generator vk.xml -o src/lib.rs
-cargo build --examples
+target/debug/vkgen vk.xml -o ../vkraw/src/lib.rs
 ```
 
-Unsafe library to use vulkan in rust.
+vkraw is an unsafe library to use vulkan in rust.
 
 I.e.
 ```rust
-extern crate vkrust;
+extern crate vkraw;
 
 fn main() {
-	let res: vkrust::VkResult;
-	let mut instance: vkrust::VkInstance = 0;
-	let application_info = vkrust::VkApplicationInfo {
-		sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_APPLICATION_INFO,
+	let app_name = std::ffi::CString::new("app name").unwrap();
+	let engine_name = std::ffi::CString::new("engine name").unwrap();
+	let application_info = vkraw::VkApplicationInfo {
+		sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_APPLICATION_INFO,
 		pNext: ptr::null(),
-		pApplicationName: "app name".as_ptr(),
-		applicationVersion: vkrust::VK_MAKE_VERSION(1,0,0),
-		pEngineName: "engine name".as_ptr(),
-		engineVersion: vkrust::VK_MAKE_VERSION(1,0,0),
-		apiVersion: vkrust::VK_MAKE_VERSION(1,0,0),
+		pApplicationName: app_name.as_ptr() as *const u8,
+		applicationVersion: vkraw::VK_MAKE_VERSION(1,0,0),
+		pEngineName: engine_name.as_ptr() as *const u8,
+		engineVersion: vkraw::VK_MAKE_VERSION(1,0,0),
+		apiVersion: vkraw::VK_MAKE_VERSION(1,0,0),
 	};
-	let create_info = vkrust::VkInstanceCreateInfo {
-		sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+	let create_info = vkraw::VkInstanceCreateInfo {
+		sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
 		pNext: ptr::null(),
 		flags: 0,
 		pApplicationInfo: &application_info,
@@ -47,12 +46,16 @@ fn main() {
 		enabledExtensionCount: 0,
 		ppEnabledExtensionNames: ptr::null(),
 	};
+
+	println!("Creating instance");
+	let res: vkraw::VkResult;
+	let mut instance: vkraw::VkInstance = 0;
 	unsafe {
-		res = vkrust::vkCreateInstance(&create_info, ptr::null(), &mut instance);
+		res = vkraw::vkCreateInstance(&create_info, ptr::null(), &mut instance);
 	};
-	assert!(res == vkrust::VkResult::VK_SUCCESS);
+	assert!(res == vkraw::VkResult::VK_SUCCESS);
 	unsafe {
-		vkrust::vkDestroyInstance(instance, ptr::null());
+		vkraw::vkDestroyInstance(instance, ptr::null());
 	}
 }
 ```
@@ -61,8 +64,9 @@ fn main() {
 
 - [x] XML parsing
 - [x] Unsafe raw interface
-- [ ] Extension support
-- [ ] Function pointer loading
+- [x] Extension support
+- [x] Function pointer loading
+- [ ] Dynamic loading of libvulkan.so
 - [ ] Safe interface
 - [ ] Loader implementation
 - [ ] Tests
