@@ -1,11 +1,11 @@
 
-extern crate vkrust;
+extern crate vkraw;
 
 #[cfg(test)]
 mod tests {
 
 	use std::ptr;
-	use vkrust::vkrust;
+	use vkraw::vkraw;
 
 	use std::vec;
 /*
@@ -15,7 +15,7 @@ enum VulkanParameter {
 }
 
 
-	fn create_instance(create_info: VulkanParameter) -> Result<vkrust::VkInstance, vkrust::VkResult> {
+	fn create_instance(create_info: VulkanParameter) -> Result<vkraw::VkInstance, vkraw::VkResult> {
 
 		unsafe {
 			
@@ -37,14 +37,14 @@ struct ApplicationInfo {
 	pub api_version: u32,
 }
 
-fn create_instance(create_info: InstanceCreateInfo) -> Result<vkrust::VkInstance, vkrust::VkResult> {
+fn create_instance(create_info: InstanceCreateInfo) -> Result<vkraw::VkInstance, vkraw::VkResult> {
 
-	let mut instance: vkrust::VkInstance = 0;
+	let mut instance: vkraw::VkInstance = 0;
 	let app_name: *const u8 = create_info.application_info.application_name.as_ptr();
 	let engine_name: *const u8 = create_info.application_info.engine_name.as_ptr();
 
-	let application_info = vkrust::VkApplicationInfo {
-		sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_APPLICATION_INFO,
+	let application_info = vkraw::VkApplicationInfo {
+		sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_APPLICATION_INFO,
 		pNext: ptr::null(),
 		pApplicationName: app_name,
 		applicationVersion: create_info.application_info.application_version,
@@ -52,8 +52,8 @@ fn create_instance(create_info: InstanceCreateInfo) -> Result<vkrust::VkInstance
 		engineVersion: create_info.application_info.engine_version,
 		apiVersion: create_info.application_info.api_version,
 	};
-	let create_info = vkrust::VkInstanceCreateInfo {
-		sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+	let create_info = vkraw::VkInstanceCreateInfo {
+		sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
 		pNext: ptr::null(),
 		flags: create_info.flags,
 		pApplicationInfo: &application_info,
@@ -62,20 +62,20 @@ fn create_instance(create_info: InstanceCreateInfo) -> Result<vkrust::VkInstance
 		enabledExtensionCount: create_info.enabled_extensions.len() as u32,
 		ppEnabledExtensionNames: create_info.enabled_extensions.as_ptr() as *const u8,
 	};
-	let res: vkrust::VkResult;
+	let res: vkraw::VkResult;
 	unsafe {
-		res = vkrust::vkCreateInstance(&create_info, ptr::null(), &mut instance);
+		res = vkraw::vkCreateInstance(&create_info, ptr::null(), &mut instance);
 	};
 	match res {
-		vkrust::VkResult::VK_SUCCESS => Ok(instance),
+		vkraw::VkResult::VK_SUCCESS => Ok(instance),
 		_ => Err(res)
 	}
 }
 
-fn destroy_instance(instance: vkrust::VkInstance) {
+fn destroy_instance(instance: vkraw::VkInstance) {
 
 	unsafe {
-		vkrust::vkDestroyInstance(instance, ptr::null());
+		vkraw::vkDestroyInstance(instance, ptr::null());
 	}
 }
 
@@ -100,7 +100,7 @@ fn destroy_instance(instance: vkrust::VkInstance) {
 		assert!(res.is_err());
 
 		match res {
-			Err(e) => assert!(e == vkrust::VkResult::VK_ERROR_EXTENSION_NOT_PRESENT),
+			Err(e) => assert!(e == vkraw::VkResult::VK_ERROR_EXTENSION_NOT_PRESENT),
 			Ok(_) => {}
 		}
 	}
@@ -126,7 +126,7 @@ fn destroy_instance(instance: vkrust::VkInstance) {
 		assert!(res.is_err());
 
 		match res {
-			Err(e) => assert!(e == vkrust::VkResult::VK_ERROR_LAYER_NOT_PRESENT),
+			Err(e) => assert!(e == vkraw::VkResult::VK_ERROR_LAYER_NOT_PRESENT),
 			Ok(_) => {}
 		}
 	}
@@ -137,19 +137,19 @@ fn destroy_instance(instance: vkrust::VkInstance) {
 #[should_fail]
 	fn test_device_bad_layers_segfault() {
 
-		let res: vkrust::VkResult;
-		let mut instance: vkrust::VkInstance = 0;
-		let application_info = vkrust::VkApplicationInfo {
-			sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_APPLICATION_INFO,
+		let res: vkraw::VkResult;
+		let mut instance: vkraw::VkInstance = 0;
+		let application_info = vkraw::VkApplicationInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_APPLICATION_INFO,
 			pNext: ptr::null(),
 			pApplicationName: "app name".as_ptr(),
-			applicationVersion: vkrust::VK_MAKE_VERSION(1,0,0),
+			applicationVersion: vkraw::VK_MAKE_VERSION(1,0,0),
 			pEngineName: "engine name".as_ptr(),
-			engineVersion: vkrust::VK_MAKE_VERSION(1,0,0),
-			apiVersion: vkrust::VK_MAKE_VERSION(1,0,0),
+			engineVersion: vkraw::VK_MAKE_VERSION(1,0,0),
+			apiVersion: vkraw::VK_MAKE_VERSION(1,0,0),
 		};
-		let create_info = vkrust::VkInstanceCreateInfo {
-			sType: vkrust::VkStructureType::VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+		let create_info = vkraw::VkInstanceCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
 			pNext: ptr::null(),
 			flags: 0,
 			pApplicationInfo: &application_info,
@@ -159,7 +159,7 @@ fn destroy_instance(instance: vkrust::VkInstance) {
 			ppEnabledExtensionNames: ptr::null(),
 		};
 		unsafe {
-			res = vkrust::vkCreateInstance(&create_info, ptr::null(), &mut instance);
+			res = vkraw::vkCreateInstance(&create_info, ptr::null(), &mut instance);
 		};
 	}*/
 
@@ -183,7 +183,7 @@ fn destroy_instance(instance: vkrust::VkInstance) {
 		assert!(res.is_err());
 
 		match res {
-			Err(e) => assert!(e == vkrust::VkResult::VK_ERROR_INCOMPATIBLE_DRIVER),
+			Err(e) => assert!(e == vkraw::VkResult::VK_ERROR_INCOMPATIBLE_DRIVER),
 			Ok(_) => {}
 		}
 	}

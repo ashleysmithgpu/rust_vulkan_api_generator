@@ -622,7 +622,7 @@ extern crate libc;
 #[macro_use]
 extern crate bitflags;
 
-pub mod vkrust {
+pub mod vkraw {
 #![allow(non_snake_case)]
 
 use std::mem;
