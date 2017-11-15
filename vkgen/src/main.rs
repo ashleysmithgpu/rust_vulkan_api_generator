@@ -615,15 +615,13 @@ fn main() {
 
 	// TODO:
 	let fluff1 = r#"
+#![allow(non_snake_case)]
 #![feature(const_fn)]
 #![feature(untagged_unions)]
 
 extern crate libc;
 #[macro_use]
 extern crate bitflags;
-
-pub mod vkraw {
-#![allow(non_snake_case)]
 
 use std::mem;
 use libc::{c_void};
@@ -893,7 +891,5 @@ pub union VkClearValue {
 		}
 
 		write!(output, "}}\n\t\t}}\n\t}}\n").expect("Failed to write");
-
-		write!(output, "}}\n").expect("Failed to write");
 	}
 }
