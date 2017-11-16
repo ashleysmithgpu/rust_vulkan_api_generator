@@ -14,9 +14,9 @@ const WIDTH: u32 = 800;
 const HEIGHT: u32 = 600;
 
 #[cfg(feature="xcb")]
-fn create_wsi(instance: vkraw::vkraw::VkInstance, vk: &vkraw::vkraw::VulkanFunctionPointers) -> (xcb::Connection, u32, u64) {
+fn create_wsi(instance: vkraw::VkInstance, vk: &vkraw::VulkanFunctionPointers) -> (xcb::Connection, u32, u64) {
 
-	let mut surface: vkraw::vkraw::VkSurfaceKHR = 0;
+	let mut surface: vkraw::VkSurfaceKHR = 0;
 	println!("Creating XCB window");
 	let (conn, screen_num) = xcb::Connection::connect(None).unwrap();
 	let win;
@@ -41,8 +41,8 @@ fn create_wsi(instance: vkraw::vkraw::VkInstance, vk: &vkraw::vkraw::VulkanFunct
 		xcb::map_window(&conn, win);
 		conn.flush();
 
-		let surface_create_info = vkraw::vkraw::VkXcbSurfaceCreateInfoKHR {
-			sType: vkraw::vkraw::VkStructureType::VK_STRUCTURE_TYPE_XCB_SURFACE_CREATE_INFO_KHR,
+		let surface_create_info = vkraw::VkXcbSurfaceCreateInfoKHR {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_XCB_SURFACE_CREATE_INFO_KHR,
 			pNext: ptr::null(),
 			flags: 0,
 			connection: conn.get_raw_conn(),
@@ -51,23 +51,23 @@ fn create_wsi(instance: vkraw::vkraw::VkInstance, vk: &vkraw::vkraw::VulkanFunct
 
 		assert!(vk.CreateXcbSurfaceKHR.is_some());
 		let res = vk.CreateXcbSurfaceKHR.unwrap()(instance, &surface_create_info, ptr::null(), &mut surface);
-		assert!(res == vkraw::vkraw::VkResult::VK_SUCCESS);
+		assert!(res == vkraw::VkResult::VK_SUCCESS);
 	}
 
 	(conn, win, surface)
 }
 
-fn load_spirv_shader_from_disk(device: vkraw::vkraw::VkDevice, filename: &str) -> Option<vkraw::vkraw::VkShaderModule> {
+fn load_spirv_shader_from_disk(device: vkraw::VkDevice, filename: &str) -> Option<vkraw::VkShaderModule> {
 
 	// Load file contents in to buffer
 	let mut f = File::open(filename).unwrap();
 	let mut buffer = Vec::new();
 	f.read_to_end(&mut buffer).unwrap();
 
-	let mut shader_mod: vkraw::vkraw::VkShaderModule = 0;
+	let mut shader_mod: vkraw::VkShaderModule = 0;
 
-	let mod_create_info = vkraw::vkraw::VkShaderModuleCreateInfo {
-		sType:  vkraw::vkraw::VkStructureType::VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+	let mod_create_info = vkraw::VkShaderModuleCreateInfo {
+		sType:  vkraw::VkStructureType::VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
 		pNext: ptr::null(),
 		flags: 0,
 		codeSize: buffer.len() as u64,
@@ -76,9 +76,9 @@ fn load_spirv_shader_from_disk(device: vkraw::vkraw::VkDevice, filename: &str) -
 
 	let res;
 	unsafe {
-		res = vkraw::vkraw::vkCreateShaderModule(device, &mod_create_info, ptr::null(), &mut shader_mod);
+		res = vkraw::vkCreateShaderModule(device, &mod_create_info, ptr::null(), &mut shader_mod);
 	}
-	if res == vkraw::vkraw::VkResult::VK_SUCCESS {
+	if res == vkraw::VkResult::VK_SUCCESS {
 		Some(shader_mod)
 	} else {
 		None
@@ -86,7 +86,7 @@ fn load_spirv_shader_from_disk(device: vkraw::vkraw::VkDevice, filename: &str) -
 }
 
 // Finds a memory type that supports exactly the properties we want
-fn get_memory_type(type_bits: u32, properties: vkraw::vkraw::VkMemoryPropertyFlags, device_memory_properties: &vkraw::vkraw::VkPhysicalDeviceMemoryProperties) -> Option<u32> {
+fn get_memory_type(type_bits: u32, properties: vkraw::VkMemoryPropertyFlags, device_memory_properties: &vkraw::VkPhysicalDeviceMemoryProperties) -> Option<u32> {
 
 	let mut type_bits_mut = type_bits.clone();
 	for i in 0..device_memory_properties.memoryTypeCount {
@@ -101,8 +101,6 @@ fn get_memory_type(type_bits: u32, properties: vkraw::vkraw::VkMemoryPropertyFla
 }
 
 fn main() {
-
-	use vkraw::*;
 
 	// Create the instance, potentially enabling the validation layers
 	let mut res: vkraw::VkResult;
@@ -145,9 +143,9 @@ fn main() {
 			flags: 0,
 			pApplicationInfo: &application_info,
 			enabledLayerCount: enabled_layers.len() as u32,
-			ppEnabledLayerNames: enabled_layers.as_ptr() as *const u8,
+			ppEnabledLayerNames: enabled_layers.as_ptr(),
 			enabledExtensionCount: enabled_extensions.len() as u32,
-			ppEnabledExtensionNames: enabled_extensions.as_ptr() as *const u8
+			ppEnabledExtensionNames: enabled_extensions.as_ptr()
 		};
 
 		println!("Creating instance");
@@ -212,9 +210,9 @@ fn main() {
 			queueCreateInfoCount: 1,
 			pQueueCreateInfos: &queue_create_info,
 			enabledLayerCount: enabled_layers.len() as u32,
-			ppEnabledLayerNames: enabled_layers.as_ptr() as *const u8,
+			ppEnabledLayerNames: enabled_layers.as_ptr(),
 			enabledExtensionCount: enabled_extensions.len() as u32,
-			ppEnabledExtensionNames: enabled_extensions.as_ptr() as *const u8,
+			ppEnabledExtensionNames: enabled_extensions.as_ptr(),
 			pEnabledFeatures: ptr::null()
 		};
 

@@ -66,8 +66,6 @@ I.e.
 ```rust
 extern crate vk;
 
-use vk::*;
-
 fn main() {
 	let instance = vk::Instance::new("my app",
 #[cfg(debug_assertions)]

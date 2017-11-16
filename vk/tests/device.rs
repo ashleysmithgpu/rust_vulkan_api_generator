@@ -16,9 +16,9 @@ mod tests {
 
 		let physical_devices = instance.physical_devices();
 		println!("Found {} physical devices", physical_devices.len());
-		for physical_device in physical_devices {
+		for physical_device in physical_devices.iter().enumerate() {
 
-			
+		
 		}
 	}
 }

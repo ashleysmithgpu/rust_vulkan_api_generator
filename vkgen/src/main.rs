@@ -166,6 +166,7 @@ fn main() {
 	let mut struct_member_name = String::new();
 	let mut struct_member_type = String::new();
 	let mut struct_member_ptr = false;
+	let mut struct_member_ptr_ptr = false;
 	let mut struct_member_const = false;
 	let mut struct_members = String::new();
 	let mut struct_member_array = false;
@@ -296,6 +297,7 @@ fn main() {
 						if matching_what[0] == "type" {
 							struct_member_const = false;
 							struct_member_ptr = false;
+							struct_member_ptr_ptr = false;
 							struct_member_array = false;
 							struct_member_array_size.clear();
 						}
@@ -463,6 +465,7 @@ fn main() {
 
 					struct_member_const |= text.find("const").is_some();
 					struct_member_ptr |= text.find("*").is_some();
+					struct_member_ptr_ptr |= text.find("*").is_some() && (text.find("*").unwrap() != text.rfind("*").unwrap());
 					if text.find("[").is_some() {
 						struct_member_array = true;
 
@@ -476,7 +479,7 @@ fn main() {
 
 					param_const |= text.find("const").is_some();
 					param_ptr |= text.find("*").is_some();
-					param_ptr_ptr |= text.find("**").is_some();
+					param_ptr_ptr |= text.find("*").is_some() && (text.find("*").unwrap() != text.rfind("*").unwrap());
 					if text.find("[").is_some() {
 						param_array = true;
 
@@ -509,19 +512,40 @@ fn main() {
 					},
 					b"member" => {
 						if matching_what[0] == "member" {
-							if struct_member_array {
-								struct_members.write_fmt(format_args!("\tpub {}: [{}{} {}; {}],\n",
-									struct_member_name,
-									if struct_member_ptr { "*" } else { "" },
-									if struct_member_const { if struct_member_ptr { "const" } else { "" } } else { if struct_member_ptr { "mut" } else { "" } },
-									struct_member_type,
-									struct_member_array_size)).expect("Could not format string");
+							if struct_member_ptr_ptr {
+								if struct_member_array {
+									struct_members.write_fmt(format_args!("\tpub {}: [{}{}{}{} {}; {}],\n",
+										struct_member_name,
+										if struct_member_ptr { "*" } else { "" },
+										if struct_member_const { if struct_member_ptr { "const" } else { "" } } else { if struct_member_ptr { "mut" } else { "" } },
+										if struct_member_ptr { "*" } else { "" },
+										if struct_member_const { if struct_member_ptr { "const" } else { "" } } else { if struct_member_ptr { "mut" } else { "" } },
+										struct_member_type,
+										struct_member_array_size)).expect("Could not format string");
+								} else {
+									struct_members.write_fmt(format_args!("\tpub {}: {}{}{}{} {},\n",
+										struct_member_name,
+										if struct_member_ptr { "*" } else { "" },
+										if struct_member_const { if struct_member_ptr { "const" } else { "" } } else { if struct_member_ptr { "mut" } else { "" } },
+										if struct_member_ptr { "*" } else { "" },
+										if struct_member_const { if struct_member_ptr { "const" } else { "" } } else { if struct_member_ptr { "mut" } else { "" } },
+										struct_member_type)).expect("Could not format string");
+								}
 							} else {
-								struct_members.write_fmt(format_args!("\tpub {}: {}{} {},\n",
-									struct_member_name,
-									if struct_member_ptr { "*" } else { "" },
-									if struct_member_const { if struct_member_ptr { "const" } else { "" } } else { if struct_member_ptr { "mut" } else { "" } },
-									struct_member_type)).expect("Could not format string");
+								if struct_member_array {
+									struct_members.write_fmt(format_args!("\tpub {}: [{}{} {}; {}],\n",
+										struct_member_name,
+										if struct_member_ptr { "*" } else { "" },
+										if struct_member_const { if struct_member_ptr { "const" } else { "" } } else { if struct_member_ptr { "mut" } else { "" } },
+										struct_member_type,
+										struct_member_array_size)).expect("Could not format string");
+								} else {
+									struct_members.write_fmt(format_args!("\tpub {}: {}{} {},\n",
+										struct_member_name,
+										if struct_member_ptr { "*" } else { "" },
+										if struct_member_const { if struct_member_ptr { "const" } else { "" } } else { if struct_member_ptr { "mut" } else { "" } },
+										struct_member_type)).expect("Could not format string");
+								}
 							}
 						}
 					},
@@ -865,7 +889,7 @@ pub union VkClearValue {
 
 
 
-		write!(output, "\t}}\n\n\timpl VulkanFunctionPointers {{\n\t\tpub fn new(instance: VkInstance) -> VulkanFunctionPointers {{\n\t\t\tVulkanFunctionPointers {{\n").expect("Failed to write");
+		write!(output, "\t}}\n\n\timpl VulkanFunctionPointers {{\n\t\tpub fn new(instance: VkInstance) -> VulkanFunctionPointers {{\n\t\t\tassert!(instance != VK_NULL_HANDLE);\n\t\t\tVulkanFunctionPointers {{\n").expect("Failed to write");
 
 		for ext in &extensions {
 
