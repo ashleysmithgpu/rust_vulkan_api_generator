@@ -14,7 +14,7 @@ const WIDTH: u32 = 800;
 const HEIGHT: u32 = 600;
 
 #[cfg(feature="xcb")]
-fn create_wsi(instance: vkraw::VkInstance, vk: &vkraw::VulkanFunctionPointers) -> (xcb::Connection, u32, u64) {
+fn create_wsi(instance: vkraw::VkInstance, vk: &vkraw::VulkanFunctionPointers) -> (xcb::Connection, u32, vkraw::VkSurfaceKHR) {
 
 	let mut surface: vkraw::VkSurfaceKHR = 0;
 	println!("Creating XCB window");
