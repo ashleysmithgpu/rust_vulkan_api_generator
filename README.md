@@ -132,3 +132,100 @@ Now create an ICD (Installable Client Driver) json file somewhere (debug_intel.j
 Point your application at it with an environment variable:
 
 	export VK_ICD_FILENAMES=/path/to/debug_intel.json
+
+# Interface tests
+
+```rust
+extern crate crossbeam;
+
+struct Instance;
+impl Instance {
+	fn new() -> Instance {
+		println!("Instance::new()");
+		Instance {}
+	}
+
+	fn create_mem(&self) -> Mem {
+		println!("Instance::create_mem()");
+		Mem { instance: self }
+	}
+}
+impl Drop for Instance {
+	fn drop(&mut self) {
+		println!("Instance::drop()");
+	}
+}
+
+// The lifetime specifiers ('a) here say "Mem should live a shorter lifetime than Instance because we have a reference to it"
+struct Mem<'a> {
+	instance: &'a Instance
+}
+impl<'a> Mem<'a> {
+	// &mut self means that we can only ever have one MappedMem instance (Cannot map() twice)
+	fn map(&mut self) -> MappedMem {
+		println!("Mem::map()");
+		MappedMem { mem: self }
+	}
+}
+impl<'a> Drop for Mem<'a> {
+	fn drop(&mut self) {
+		println!("Mem::drop()");
+	}
+}
+
+// MappedMem should live a shorter lifetime than Mem
+struct MappedMem<'a> {
+	mem: &'a Mem<'a>
+}
+impl<'a> MappedMem<'a> {
+	fn get_ptr<T>(&mut self) -> *mut T {
+		println!("MappedMem::get_ptr()");
+		0 as *mut T
+	}
+}
+impl<'a> Drop for MappedMem<'a> {
+	fn drop(&mut self) {
+		println!("MappedMem::drop()");
+	}
+}
+
+fn main() {
+	let instance_ptr = std::sync::Arc::new(Instance::new());
+
+	// We can create multiple instances of Mem
+	// if we want to transfer them across thread boundaries then we need to wrap them in a mutex/ref count
+	let mut mem = instance_ptr.create_mem();
+	let mut mem2 = instance_ptr.create_mem();
+
+	// We can only map memory from a Mem once (because map is &mut self), before it gets unmapped by the Drop
+	// if we want to transfer the MappedMem across thread boundaries it also needs to be wrapped in a mutex/ref count
+	let mapped_mem_ptr = std::sync::Arc::new(std::sync::Mutex::new(mem.map()));
+	//let test = mem.map(); // Error
+
+	{
+		//let mut mem3;
+
+		let instance_ptr_clone = instance_ptr.clone();
+		let mapped_mem_ptr_clone = mapped_mem_ptr.clone();
+
+		println!("start of thread");
+		crossbeam::scope(|scope| {
+			scope.spawn(move || {
+
+				// Accessing the MappedMem from another thread by using a mutex
+				let mut m = mapped_mem_ptr_clone.lock().unwrap();
+				let asdf: *mut u32 = m.get_ptr();
+				//unsafe { *asdf = 1; }
+				let mut mem4 = instance_ptr_clone.create_mem();
+				// TODO: cant create memory here and pass it outside of the thread boundary because we need a
+				// reference to Instance. We have a reference counted pointer to an Instance. So if we could get a reference
+				// to it, it could be destroyed while we still have a reference
+				//mem3 = instance_ptr_clone.create_mem();
+			});
+		});
+		println!("end of thread");
+
+		let mut m = mapped_mem_ptr.lock().unwrap();
+		let asdf: *mut u32 = m.get_ptr();
+	}
+}
