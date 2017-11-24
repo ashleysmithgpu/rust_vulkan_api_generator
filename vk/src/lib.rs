@@ -31,6 +31,10 @@ pub struct Instance {
 	pub physical_devices: Vec<PhysicalDevice>
 }
 
+pub struct Device {
+	pub device: vkraw::VkDevice
+}
+
 pub struct Surface<'a> {
 	pub surface: vkraw::VkSurfaceKHR,
 	instance: &'a Instance
@@ -326,12 +330,83 @@ impl Instance {
 	}
 }
 
+impl PhysicalDevice {
+	pub fn create_device(&self, layers: Vec<String>, extensions: Vec<String>, queue_family_index: u32, queue_priorities: Vec<f32>) -> Result<Device, vkraw::VkResult> {
+		let mut device: vkraw::VkDevice = 0;
+
+		// Create copy of each of the strings as a null terminated string
+		let mut enabled_layers_rust = Vec::<CString>::with_capacity(layers.len());
+		for l in &layers {
+			enabled_layers_rust.push(CString::new(l.clone()).unwrap());
+		}
+		let mut enabled_extensions_rust = Vec::<CString>::with_capacity(extensions.len());
+		for e in &extensions {
+			enabled_extensions_rust.push(CString::new(e.clone()).unwrap());
+		}
+
+		// Create a vector of pointers to the above
+		let mut enabled_layers = Vec::<*const u8>::with_capacity(layers.len());
+		for l in &enabled_layers_rust {
+			enabled_layers.push(l.as_ptr() as *const u8);
+		}
+		let mut enabled_extensions = Vec::<*const u8>::with_capacity(extensions.len());
+		for e in &enabled_extensions_rust {
+			enabled_extensions.push(e.as_ptr() as *const u8);
+		}
+
+		let queue_create_info = vkraw::VkDeviceQueueCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: 0,
+			queueFamilyIndex: queue_family_index,
+			queueCount: queue_priorities.len() as u32,
+			pQueuePriorities: queue_priorities.as_ptr() as *const f32
+		};
+		let device_create_info = vkraw::VkDeviceCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: 0,
+			queueCreateInfoCount: 1,
+			pQueueCreateInfos: &queue_create_info,
+			enabledLayerCount: enabled_layers.len() as u32,
+			ppEnabledLayerNames: enabled_layers.as_ptr(),
+			enabledExtensionCount: enabled_extensions.len() as u32,
+			ppEnabledExtensionNames: enabled_extensions.as_ptr(),
+			pEnabledFeatures: ptr::null()
+		};
+
+		let res;
+		unsafe {
+			res = vkraw::vkCreateDevice(self.physical_device, &device_create_info, ptr::null(), &mut device);
+		};
+
+		if res == vkraw::VkResult::VK_SUCCESS {
+
+			assert!(device != vkraw::VK_NULL_HANDLE);
+			assert!(res == vkraw::VkResult::VK_SUCCESS);
+			Ok(Device { device: device })
+		} else {
+			Err(res)
+		}
+	}
+}
+
 impl Drop for Instance {
 	fn drop(&mut self) {
 		assert!(self.instance != vkraw::VK_NULL_HANDLE);
 		unsafe {
 			println!("vkDestroyInstance");
 			vkraw::vkDestroyInstance(self.instance, ptr::null());
+		}
+	}
+}
+
+impl Drop for Device {
+	fn drop(&mut self) {
+		assert!(self.device != vkraw::VK_NULL_HANDLE);
+		unsafe {
+			println!("vkDestroyDevice");
+			vkraw::vkDestroyDevice(self.device, ptr::null());
 		}
 	}
 }
