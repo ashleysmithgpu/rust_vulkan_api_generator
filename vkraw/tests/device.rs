@@ -5,8 +5,7 @@ extern crate vkraw;
 mod tests {
 
 	use std::ptr;
-	use vkraw::vkraw;
-
+	use vkraw;
 	use std::vec;
 /*
 enum VulkanParameter {
@@ -58,9 +57,9 @@ fn create_instance(create_info: InstanceCreateInfo) -> Result<vkraw::VkInstance,
 		flags: create_info.flags,
 		pApplicationInfo: &application_info,
 		enabledLayerCount: create_info.enabled_layers.len() as u32,
-		ppEnabledLayerNames: create_info.enabled_layers.as_ptr() as *const u8,
+		ppEnabledLayerNames: create_info.enabled_layers.as_ptr() as *const*const u8,
 		enabledExtensionCount: create_info.enabled_extensions.len() as u32,
-		ppEnabledExtensionNames: create_info.enabled_extensions.as_ptr() as *const u8,
+		ppEnabledExtensionNames: create_info.enabled_extensions.as_ptr() as *const*const u8,
 	};
 	let res: vkraw::VkResult;
 	unsafe {

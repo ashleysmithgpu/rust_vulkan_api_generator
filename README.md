@@ -15,6 +15,7 @@ I.e.
 cd vkgen
 wget https://raw.githubusercontent.com/KhronosGroup/Vulkan-LoaderAndValidationLayers/master/scripts/vk.xml
 cargo build
+mkdir ../vkraw/src/
 target/debug/vkgen vk.xml -o ../vkraw/src/lib.rs
 ```
 

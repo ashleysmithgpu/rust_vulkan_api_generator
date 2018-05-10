@@ -68,6 +68,8 @@ fn translate_define(define: (String, String)) -> String {
 	match define.0.as_ref() {
 		"VK_HEADER_VERSION" => format!("\npub const VK_HEADER_VERSION: i32 = {};", re.captures(&define.1).unwrap().get(0).unwrap().as_str()).to_string(),
 		"VK_NULL_HANDLE" => "\npub const VK_NULL_HANDLE: u64 = 0;".to_string(),
+		"ANativeWindow" => "\npub type ANativeWindow = u64;".to_string(),
+		"AHardwareBuffer" => "\npub type AHardwareBuffer = u64;".to_string(),
 		_ => String::new()
 	}
 }
@@ -92,6 +94,7 @@ fn translate_values(original_value: String) -> String {
 		"(~0U)" => "::std::usize::MAX".to_string(),
 		"(~0ULL)" => "::std::u64::MAX".to_string(),
 		"(~0U-1)" => "::std::usize::MAX - 1".to_string(),
+		"(~0U-2)" => "::std::usize::MAX - 2".to_string(),
 		_ => original_value.to_string()
 	}
 }
@@ -250,6 +253,8 @@ fn main() {
 
 	let mut extensions = Vec::<Extension>::new();
 
+	// TODO: hack
+	let mut require_feature = String::new();
 
 	let mut attributes: HashMap<String, String> = HashMap::new();
 
@@ -328,6 +333,11 @@ fn main() {
 								});
 							}
 						}
+						if let Some(feature) = attributes.get("feature") {
+							require_feature = feature.to_string();
+						} else {
+							require_feature = "".to_string();
+						}
 					},
 					b"extension" => {
 						if matching_what[0] == "extensions" {
@@ -360,9 +370,14 @@ fn main() {
 
 				match e.name() {
 					b"enum" => {
+
+
+if require_feature == "" {
+
+
 						if matching_what[0] == "enums" {
 							let name = if let Some(name) = attributes.get("name") { name.to_string() } else { "".to_string() };
-							let value = if let Some(value) = attributes.get("value") { value.to_string() } else { "".to_string() };
+							let value = if let Some(value) = attributes.get("value") { value.to_string() } else { if let Some(alias) = attributes.get("alias") { alias.to_string() } else { "".to_string() } };
 							let bitpos = if let Some(bitpos) = attributes.get("bitpos") { bitpos.to_string() } else { "".to_string() };
 							if matching_api_constants {
 								api_constants.push((name, value));
@@ -405,8 +420,23 @@ fn main() {
 								});
 							}
 						}
+
+}
+
+
 					},
 					b"type" => {
+
+
+
+
+
+if require_feature == "" {
+
+
+
+
+
 						if matching_what[0] == "types" {
 							let name = if let Some(name) = attributes.get("name") { name.to_string() } else { "".to_string() };
 							if attributes.contains_key("requires") {
@@ -416,8 +446,21 @@ fn main() {
 							let name = if let Some(name) = attributes.get("name") { name.to_string() } else { "".to_string() };
 							features.last_mut().unwrap().contents.push(FeatureContent::Type(name.to_string()));
 						}
+
+
+
+
+}
+
+
 					},
 					b"command" => {
+
+
+if require_feature == "" {
+
+
+
 						if matching_what[0] == "require" && matching_what[1] == "feature" {
 							let name = if let Some(name) = attributes.get("name") { name.to_string() } else { "".to_string() };
 							features.last_mut().unwrap().contents.push(FeatureContent::Command(name.to_string()));
@@ -427,6 +470,11 @@ fn main() {
 								extensions.last_mut().unwrap().types.push(ExtensionNewType::Command(name.to_string()));
 							}
 						}
+
+
+
+}
+
 					},
 					_ => (),
 				}
@@ -693,6 +741,8 @@ pub type PFN_vkInternalAllocationNotification = *const c_void;
 pub type PFN_vkInternalFreeNotification = *const c_void;
 #[allow(non_camel_case_types)]
 pub type PFN_vkDebugReportCallbackEXT = *const c_void;
+#[allow(non_camel_case_types)]
+pub type PFN_vkDebugUtilsMessengerCallbackEXT = *const c_void;
 #[allow(non_camel_case_types)]
 pub type PFN_vkVoidFunction = *const c_void;
 

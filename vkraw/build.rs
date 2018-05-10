@@ -20,5 +20,5 @@ fn main() {
 	// Link against the libvulkan.so from the loader
 	// TODO: should we take over the loader functionality?
 	// TODO: should we link dynamically?
-	println!("cargo:rustc-link-search=/home/ash/github/Vulkan-LoaderAndValidationLayers/dbuild/loader");
+	println!("cargo:rustc-link-search=/home/ash/github/Vulkan-LoaderAndValidationLayers/build/loader");
 }

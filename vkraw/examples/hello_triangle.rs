@@ -59,10 +59,19 @@ fn create_wsi(instance: vkraw::VkInstance, vk: &vkraw::VulkanFunctionPointers) -
 
 fn load_spirv_shader_from_disk(device: vkraw::VkDevice, filename: &str) -> Option<vkraw::VkShaderModule> {
 
-	// Load file contents in to buffer
-	let mut f = File::open(filename).unwrap();
 	let mut buffer = Vec::new();
-	f.read_to_end(&mut buffer).unwrap();
+
+	// Load file contents in to buffer
+	if let Ok(mut f) = File::open(filename) {
+		println!("Loaded {}", filename);
+		f.read_to_end(&mut buffer).unwrap();
+	} else if let Ok(mut f) = File::open("examples/".to_owned() + filename) {
+		println!("Loaded examples/{}", filename);
+		f.read_to_end(&mut buffer).unwrap();
+	} else {
+		println!("Could not load file {}", filename);
+		return None
+	}
 
 	let mut shader_mod: vkraw::VkShaderModule = 0;
 
@@ -185,7 +194,7 @@ fn main() {
 	let queue_create_info = vkraw::VkDeviceQueueCreateInfo {
 		sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
 		pNext: ptr::null(),
-		flags: 0,
+		flags: vkraw::VkDeviceQueueCreateFlagBits::_EMPTY,
 		queueFamilyIndex: 0,
 		queueCount: 1,
 		pQueuePriorities: &priorities as *const f32
@@ -1358,17 +1367,33 @@ fn main() {
 				frame_index += 1;
 			}
 
+			// Clean up
 			unsafe {
 				vkraw::vkDeviceWaitIdle(device);
 
+				vkraw::vkDestroySemaphore(device, present_complete_sem, ptr::null());
+				vkraw::vkDestroySemaphore(device, render_complete_sem, ptr::null());
+
 				for i in 0..swapchain_image_count {
+					vkraw::vkDestroyFence(device, fences[i as usize], ptr::null());
 					vkraw::vkDestroyFramebuffer(device, framebuffers[i as usize], ptr::null());
+					vkraw::vkDestroyBuffer(device, uniform_buffers[i as usize], ptr::null());
+					vkraw::vkFreeMemory(device, uniform_buffers_mem[i as usize], ptr::null());
 				};
 				vkraw::vkDestroyRenderPass(device, render_pass, ptr::null());
-
+				vkraw::vkDestroyPipeline(device, pipeline, ptr::null());
+				vkraw::vkDestroyPipelineCache(device, pipeline_cache, ptr::null());
+				vkraw::vkDestroyDescriptorSetLayout(device, descriptor_set_layout, ptr::null());
+				vkraw::vkDestroyPipelineLayout(device, pipeline_layout, ptr::null());
+				vkraw::vkDestroyDescriptorPool(device, descriptor_pool, ptr::null());
 				vkraw::vkDestroyImage(device, ds_image, ptr::null());
 				vkraw::vkFreeMemory(device, ds_mem, ptr::null());
 				vkraw::vkDestroyImageView(device, ds_image_view, ptr::null());
+
+				vkraw::vkDestroyBuffer(device, vertex_buffer, ptr::null());
+				vkraw::vkFreeMemory(device, vertex_mem, ptr::null());
+				vkraw::vkDestroyBuffer(device, index_buffer, ptr::null());
+				vkraw::vkFreeMemory(device, index_mem, ptr::null());
 
 				vkraw::vkFreeCommandBuffers(device, command_pool, command_buffers.len() as u32, command_buffers.as_ptr());
 				vkraw::vkDestroyCommandPool(device, command_pool, ptr::null());
@@ -1387,4 +1412,6 @@ fn main() {
 		vkraw::vkDestroyDevice(device, ptr::null());
 		vkraw::vkDestroyInstance(instance, ptr::null());
 	}
+
+	println!("End of program");
 }
