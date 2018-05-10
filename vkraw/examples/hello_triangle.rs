@@ -35,7 +35,7 @@ fn create_wsi(instance: vkraw::VkInstance, vk: &vkraw::VulkanFunctionPointers) -
 			xcb::WINDOW_CLASS_INPUT_OUTPUT as u16,
 			screen.root_visual(), &[
 				(xcb::CW_BACK_PIXEL, screen.white_pixel()),
-				(xcb::CW_EVENT_MASK, xcb::EVENT_MASK_EXPOSURE | xcb::EVENT_MASK_KEY_PRESS),
+				(xcb::CW_EVENT_MASK, xcb::EVENT_MASK_EXPOSURE | xcb::EVENT_MASK_KEY_PRESS | xcb::EVENT_MASK_STRUCTURE_NOTIFY),
 			]
 		);
 		xcb::map_window(&conn, win);
@@ -175,6 +175,11 @@ fn main() {
 	}
 	assert!(num_physical_devices > 0);
 
+	println!("Found {} physical devices", num_physical_devices);
+
+	num_physical_devices = std::cmp::min(1, num_physical_devices);
+	println!("Using physical device 0");
+
 	let mut physical_device: vkraw::VkPhysicalDevice = 0;
 	unsafe {
 		vkraw::vkEnumeratePhysicalDevices(instance, &mut num_physical_devices, &mut physical_device);
@@ -189,91 +194,118 @@ fn main() {
 		vkraw::vkGetPhysicalDeviceMemoryProperties(physical_device, &mut global_memory_properties);
 	}
 
-	let priorities: [f32; 1] = [1.0];
+	let mut device: vkraw::VkDevice = 0;
 
-	let queue_create_info = vkraw::VkDeviceQueueCreateInfo {
-		sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-		pNext: ptr::null(),
-		flags: vkraw::VkDeviceQueueCreateFlagBits::_EMPTY,
-		queueFamilyIndex: 0,
-		queueCount: 1,
-		pQueuePriorities: &priorities as *const f32
+	// Create the window system
+	let wsi_info = create_wsi(instance, &vk);
+
+	let (wm_protocols, wm_delete_window) = {
+		let pc = xcb::intern_atom(&wsi_info.0, false, "WM_PROTOCOLS");
+		let dwc = xcb::intern_atom(&wsi_info.0, false, "WM_DELETE_WINDOW");
+
+		let p = match pc.get_reply() {
+			Ok(p) => p.atom(),
+			Err(_) => panic!("could not load WM_PROTOCOLS atom")
+		};
+		let dw = match dwc.get_reply() {
+			Ok(dw) => dw.atom(),
+			Err(_) => panic!("could not load WM_DELETE_WINDOW atom")
+		};
+		(p, dw)
 	};
 
-	// Create the device
-	let mut device: vkraw::VkDevice = 0;
+	let protocols = [wm_delete_window];
+	xcb::change_property(&wsi_info.0, xcb::PROP_MODE_REPLACE as u8, wsi_info.1, wm_protocols, xcb::ATOM_ATOM, 32, &protocols);
+
+
 	{
-		let enabled_extensions_rust = vec![
-			std::ffi::CString::new("VK_KHR_swapchain").unwrap()
-		];
-
-		let enabled_layers: Vec<*const u8> = vec![
-		];
-		let enabled_extensions: Vec<*const u8> = vec![
-			enabled_extensions_rust[0].as_ptr() as *const u8
-		];
-		let device_create_info = vkraw::VkDeviceCreateInfo {
-			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-			pNext: ptr::null(),
-			flags: 0,
-			queueCreateInfoCount: 1,
-			pQueueCreateInfos: &queue_create_info,
-			enabledLayerCount: enabled_layers.len() as u32,
-			ppEnabledLayerNames: enabled_layers.as_ptr(),
-			enabledExtensionCount: enabled_extensions.len() as u32,
-			ppEnabledExtensionNames: enabled_extensions.as_ptr(),
-			pEnabledFeatures: ptr::null()
-		};
-
-		println!("Creating device");
+		// Get present and graphics queue index
+		let mut queue_count = 0;
 		unsafe {
-			res = vkraw::vkCreateDevice(physical_device, &device_create_info, ptr::null(), &mut device);
+			vkraw::vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &mut queue_count, ptr::null_mut());
+		}
+		assert!(queue_count > 0);
+		println!("Found {} queues:", queue_count);
+
+		let mut queue_props = Vec::<vkraw::VkQueueFamilyProperties>::with_capacity(queue_count as usize);
+		let mut queue_supports_present = Vec::<vkraw::VkBool32>::with_capacity(queue_count as usize);
+		unsafe {
+			vkraw::vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &mut queue_count, queue_props.as_mut_ptr());
+			queue_props.set_len(queue_count as usize);
+			queue_supports_present.set_len(queue_count as usize);
+		}
+
+		let mut graphics_and_present_queue_index = 0;
+		let mut found_good_queue = false;
+		for (i,prop) in queue_props.iter().enumerate() {
+			print!(" Queue {} supports: ", i);
+			assert!(vk.GetPhysicalDeviceSurfaceSupportKHR.is_some());
+			vk.GetPhysicalDeviceSurfaceSupportKHR.unwrap()(physical_device, i as u32, wsi_info.2, &mut queue_supports_present[i as usize]);
+			if !(prop.queueFlags & vkraw::VkQueueFlags::VK_QUEUE_GRAPHICS_BIT).is_empty() {
+				print!(" graphics, ");
+			}
+			if !(prop.queueFlags & vkraw::VkQueueFlags::VK_QUEUE_COMPUTE_BIT).is_empty() {
+				print!(" compute, ");
+			}
+			if !(prop.queueFlags & vkraw::VkQueueFlags::VK_QUEUE_TRANSFER_BIT).is_empty() {
+				print!(" transfer, ");
+			}
+			if queue_supports_present[i as usize] > 0 {
+				print!(" present, ");
+			}
+			if !(prop.queueFlags & vkraw::VkQueueFlags::VK_QUEUE_GRAPHICS_BIT).is_empty() && queue_supports_present[i] > 0 {
+				graphics_and_present_queue_index = i;
+				found_good_queue = true;
+			}
+			print!("\n");
+		}
+		assert!(found_good_queue);
+		println!("Using queue index {}", graphics_and_present_queue_index);
+
+		let priorities: [f32; 1] = [1.0];
+
+		let queue_create_info = vkraw::VkDeviceQueueCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: vkraw::VkDeviceQueueCreateFlagBits::_EMPTY,
+			queueFamilyIndex: 0,
+			queueCount: 1,
+			pQueuePriorities: &priorities as *const f32
 		};
-		assert!(device != vkraw::VK_NULL_HANDLE);
-		assert!(res == vkraw::VkResult::VK_SUCCESS);
-	}
 
-	{
-		// Create the window system
-		let wsi_info = create_wsi(instance, &vk);
+		// Create the device
 		{
-			// Get present and graphics queue index
-			let mut queue_count = 0;
+			let enabled_extensions_rust = vec![
+				std::ffi::CString::new("VK_KHR_swapchain").unwrap()
+			];
+
+			let enabled_layers: Vec<*const u8> = vec![
+			];
+			let enabled_extensions: Vec<*const u8> = vec![
+				enabled_extensions_rust[0].as_ptr() as *const u8
+			];
+			let device_create_info = vkraw::VkDeviceCreateInfo {
+				sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+				pNext: ptr::null(),
+				flags: 0,
+				queueCreateInfoCount: 1,
+				pQueueCreateInfos: &queue_create_info,
+				enabledLayerCount: enabled_layers.len() as u32,
+				ppEnabledLayerNames: enabled_layers.as_ptr(),
+				enabledExtensionCount: enabled_extensions.len() as u32,
+				ppEnabledExtensionNames: enabled_extensions.as_ptr(),
+				pEnabledFeatures: ptr::null()
+			};
+
+			println!("Creating device");
 			unsafe {
-				vkraw::vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &mut queue_count, ptr::null_mut());
-			}
-			assert!(queue_count > 0);
-			println!("Found {} queues:", queue_count);
+				res = vkraw::vkCreateDevice(physical_device, &device_create_info, ptr::null(), &mut device);
+			};
+			assert!(device != vkraw::VK_NULL_HANDLE);
+			assert!(res == vkraw::VkResult::VK_SUCCESS);
+		}
 
-			let mut queue_props = Vec::<vkraw::VkQueueFamilyProperties>::with_capacity(queue_count as usize);
-			let mut queue_supports_present = Vec::<vkraw::VkBool32>::with_capacity(queue_count as usize);
-			unsafe {
-				vkraw::vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &mut queue_count, queue_props.as_mut_ptr());
-				queue_props.set_len(queue_count as usize);
-				queue_supports_present.set_len(queue_count as usize);
-			}
-
-			let mut graphics_and_present_queue_index = 0;
-			let mut found_good_queue = false;
-			for (i,prop) in queue_props.iter().enumerate() {
-				print!(" Queue {} supports: ", i);
-				assert!(vk.GetPhysicalDeviceSurfaceSupportKHR.is_some());
-				vk.GetPhysicalDeviceSurfaceSupportKHR.unwrap()(physical_device, i as u32, wsi_info.2, &mut queue_supports_present[i as usize]);
-				if !(prop.queueFlags & vkraw::VkQueueFlags::VK_QUEUE_GRAPHICS_BIT).is_empty() {
-					print!(" graphics, ");
-				}
-				if queue_supports_present[i as usize] > 0 {
-					print!(" present, ");
-				}
-				if !(prop.queueFlags & vkraw::VkQueueFlags::VK_QUEUE_GRAPHICS_BIT).is_empty() && queue_supports_present[i] > 0 {
-					graphics_and_present_queue_index = i;
-					found_good_queue = true;
-				}
-				print!("\n");
-			}
-			assert!(found_good_queue);
-			println!("Using queue index {}", graphics_and_present_queue_index);
-
+		{
 			let mut queue;
 			unsafe {
 				queue = std::mem::uninitialized();
@@ -462,7 +494,7 @@ fn main() {
 			let mut ds_image: vkraw::VkImage = 0;
 			let mut ds_image_view: vkraw::VkImageView = 0;
 			let mut ds_mem: vkraw::VkDeviceMemory = 0;
-			let depth_format = vkraw::VkFormat::VK_FORMAT_D24_UNORM_S8_UINT;
+			let depth_format = vkraw::VkFormat::VK_FORMAT_D32_SFLOAT;
 			{
 				let image_create_info = vkraw::VkImageCreateInfo {
 					sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -509,7 +541,7 @@ fn main() {
 						a: vkraw::VkComponentSwizzle::VK_COMPONENT_SWIZZLE_IDENTITY
 					},
 					subresourceRange: vkraw::VkImageSubresourceRange {
-						aspectMask: vkraw::VkImageAspectFlags::VK_IMAGE_ASPECT_DEPTH_BIT | vkraw::VkImageAspectFlags::VK_IMAGE_ASPECT_STENCIL_BIT,
+						aspectMask: vkraw::VkImageAspectFlags::VK_IMAGE_ASPECT_DEPTH_BIT,
 						baseMipLevel: 0,
 						levelCount: 1,
 						baseArrayLayer: 0,
@@ -550,7 +582,7 @@ fn main() {
 						samples: vkraw::VkSampleCountFlagBits::VK_SAMPLE_COUNT_1_BIT,
 						loadOp: vkraw::VkAttachmentLoadOp::VK_ATTACHMENT_LOAD_OP_CLEAR,
 						storeOp: vkraw::VkAttachmentStoreOp::VK_ATTACHMENT_STORE_OP_STORE,
-						stencilLoadOp: vkraw::VkAttachmentLoadOp::VK_ATTACHMENT_LOAD_OP_CLEAR,
+						stencilLoadOp: vkraw::VkAttachmentLoadOp::VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 						stencilStoreOp: vkraw::VkAttachmentStoreOp::VK_ATTACHMENT_STORE_OP_DONT_CARE,
 						initialLayout: vkraw::VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED,
 						finalLayout: vkraw::VkImageLayout::VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
@@ -1277,6 +1309,7 @@ fn main() {
 					None => {}
 					Some(event) => {
 						let r = event.response_type() & !0x80;
+						println!("xcb event {:?}", r);
 						match r {
 							xcb::EXPOSE => {
 								println!("Expose");
@@ -1287,6 +1320,17 @@ fn main() {
 								};
 								println!("Key {} pressed", key_press.detail());
 								break;
+							},
+							xcb::CLIENT_MESSAGE => {
+								let cmev = unsafe {
+									xcb::cast_event::<xcb::ClientMessageEvent>(&event)
+								};
+								if cmev.type_() == wm_protocols && cmev.format() == 32 {
+									let protocol = cmev.data().data32()[0];
+									if protocol == wm_delete_window {
+										break;
+									}
+								}
 							},
 							_ => {}
 						}

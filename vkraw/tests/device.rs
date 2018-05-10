@@ -7,6 +7,7 @@ mod tests {
 	use std::ptr;
 	use vkraw;
 	use std::vec;
+	use std;
 /*
 enum VulkanParameter {
 	ApplicationInfo { next: Option<VulkanParameter>, application_name: str, application_version: u32, engine_name: str, engine_version: u32, api_version: u32 },
@@ -102,6 +103,7 @@ fn destroy_instance(instance: vkraw::VkInstance) {
 			Err(e) => assert!(e == vkraw::VkResult::VK_ERROR_EXTENSION_NOT_PRESENT),
 			Ok(_) => {}
 		}
+		std::thread::sleep(std::time::Duration::from_millis(1000));
 	}
 
 #[test]
@@ -128,6 +130,7 @@ fn destroy_instance(instance: vkraw::VkInstance) {
 			Err(e) => assert!(e == vkraw::VkResult::VK_ERROR_LAYER_NOT_PRESENT),
 			Ok(_) => {}
 		}
+		std::thread::sleep(std::time::Duration::from_millis(1000));
 	}
 
 // TODO: no way to use i.e. should_fail since we segfault here
@@ -172,7 +175,7 @@ fn destroy_instance(instance: vkraw::VkInstance) {
 				application_version: 1,
 				engine_name: "test_engine".to_string(),
 				engine_version: 0,
-				api_version: 93499348,
+				api_version: vkraw::VK_MAKE_VERSION(0, 0, 0),
 			},
 			enabled_layers: vec::Vec::new(),
 			enabled_extensions: vec::Vec::new()
@@ -185,6 +188,7 @@ fn destroy_instance(instance: vkraw::VkInstance) {
 			Err(e) => assert!(e == vkraw::VkResult::VK_ERROR_INCOMPATIBLE_DRIVER),
 			Ok(_) => {}
 		}
+		std::thread::sleep(std::time::Duration::from_millis(1000));
 	}
 
 #[test]
@@ -207,6 +211,7 @@ fn destroy_instance(instance: vkraw::VkInstance) {
 		assert!(res.is_ok());
 
 		destroy_instance(res.unwrap());
+		std::thread::sleep(std::time::Duration::from_millis(1000));
 	}
 
 #[test]
@@ -244,5 +249,6 @@ fn destroy_instance(instance: vkraw::VkInstance) {
 		assert!(res2.is_ok());
 		destroy_instance(res2.unwrap());
 		destroy_instance(res.unwrap());
+		std::thread::sleep(std::time::Duration::from_millis(1000));
 	}
 }
