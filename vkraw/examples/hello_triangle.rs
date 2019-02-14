@@ -1,14 +1,6 @@
 
-extern crate vkraw;
-extern crate libc;
-extern crate glm;
-extern crate num;
-#[cfg(feature="xcb")]
-extern crate xcb;
-
 use std::ptr;
 use std::io::prelude::*;
-use std::fs::File;
 
 const WIDTH: u32 = 800;
 const HEIGHT: u32 = 600;
@@ -57,15 +49,100 @@ fn create_wsi(instance: vkraw::VkInstance, vk: &vkraw::VulkanFunctionPointers) -
 	(conn, win, surface)
 }
 
+
+// WARNING: windows below
+
+
+// We have to encode text to wide format for Windows
+#[cfg(windows)]
+fn win32_string(value: &str) -> Vec<u16> {
+	use std::os::windows::ffi::OsStrExt;
+    std::ffi::OsStr::new(value).encode_wide().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(feature = "winapi")]
+fn create_wsi(instance: vkraw::VkInstance, vk: &vkraw::VulkanFunctionPointers) -> (winapi::shared::windef::HWND, winapi::shared::minwindef::HINSTANCE, vkraw::VkSurfaceKHR) {
+
+	let hinstance;
+	let handle;
+	let mut surface: vkraw::VkSurfaceKHR = 0;
+	unsafe {
+		let name = win32_string("windoze");
+		println!("Creating WIN32 window");
+		hinstance = winapi::um::libloaderapi::GetModuleHandleW(std::ptr::null_mut());
+		let wnd_class = winapi::um::winuser::WNDCLASSW {
+			style : winapi::um::winuser::CS_HREDRAW | winapi::um::winuser::CS_VREDRAW,
+			lpfnWndProc: Some(winapi::um::winuser::DefWindowProcW),
+			hInstance: hinstance,
+			lpszClassName: name.as_ptr(),
+			cbClsExtra: 0,
+			cbWndExtra: 0,
+			hIcon: std::ptr::null_mut(),
+			hCursor: std::ptr::null_mut(),
+			hbrBackground: std::ptr::null_mut(),
+			lpszMenuName: std::ptr::null_mut(),
+		};
+		winapi::um::winuser::RegisterClassW(&wnd_class);
+
+		let width = 800;
+		let height = 600;
+		
+		println!("Window {}x{}", width, height);
+		
+		let mut window_rect = winapi::shared::windef::RECT {
+			left: 0,
+			top: 0,
+			right: width,
+			bottom: height
+		};
+
+		let style = winapi::um::winuser::WS_OVERLAPPEDWINDOW | winapi::um::winuser::WS_CLIPSIBLINGS | winapi::um::winuser::WS_CLIPCHILDREN;
+		let exstyle = winapi::um::winuser::WS_EX_APPWINDOW | winapi::um::winuser::WS_EX_WINDOWEDGE;
+		winapi::um::winuser::AdjustWindowRectEx(&mut window_rect, style, 0, exstyle);
+		
+		handle = winapi::um::winuser::CreateWindowExW(
+			0,
+			name.as_ptr(),
+			name.as_ptr(),
+			style, 
+			0,
+			0,
+			window_rect.right - window_rect.left,
+			window_rect.bottom - window_rect.top,
+			std::ptr::null_mut(),
+			std::ptr::null_mut(),
+			hinstance,
+			std::ptr::null_mut());
+	
+		let surface_create_info = vkraw::VkWin32SurfaceCreateInfoKHR {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
+			pNext: ptr::null(),
+			flags: 0,
+			hinstance: hinstance as u64,
+			hwnd: handle as u64
+		};
+		
+		winapi::um::winuser::ShowWindow(handle, winapi::um::winuser::SW_SHOW);
+		winapi::um::winuser::SetForegroundWindow(handle);
+		winapi::um::winuser::SetFocus(handle);
+
+		assert!(vk.CreateWin32SurfaceKHR.is_some());
+		let res = vk.CreateWin32SurfaceKHR.unwrap()(instance, &surface_create_info, ptr::null(), &mut surface);
+		assert!(res == vkraw::VkResult::VK_SUCCESS);
+	}
+
+	(handle, hinstance, surface)
+}
+
 fn load_spirv_shader_from_disk(device: vkraw::VkDevice, filename: &str) -> Option<vkraw::VkShaderModule> {
 
 	let mut buffer = Vec::new();
 
 	// Load file contents in to buffer
-	if let Ok(mut f) = File::open(filename) {
+	if let Ok(mut f) = std::fs::File::open(filename) {
 		println!("Loaded {}", filename);
 		f.read_to_end(&mut buffer).unwrap();
-	} else if let Ok(mut f) = File::open("examples/".to_owned() + filename) {
+	} else if let Ok(mut f) = std::fs::File::open("examples/".to_owned() + filename) {
 		println!("Loaded examples/{}", filename);
 		f.read_to_end(&mut buffer).unwrap();
 	} else {
@@ -76,7 +153,7 @@ fn load_spirv_shader_from_disk(device: vkraw::VkDevice, filename: &str) -> Optio
 	let mut shader_mod: vkraw::VkShaderModule = 0;
 
 	let mod_create_info = vkraw::VkShaderModuleCreateInfo {
-		sType:  vkraw::VkStructureType::VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+		sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
 		pNext: ptr::null(),
 		flags: 0,
 		codeSize: buffer.len() as u64,
@@ -109,6 +186,22 @@ fn get_memory_type(type_bits: u32, properties: vkraw::VkMemoryPropertyFlags, dev
 	None
 }
 
+fn debug_message_callback(flags: libc::c_int, otype: libc::c_int, srco: u64, loc: usize, msgcode: u32, layer: *const libc::c_char, msg: *const libc::c_char, _userdata: *mut libc::c_void) -> bool {
+
+	let c_s = unsafe { std::ffi::CStr::from_ptr(msg) };
+	let c_sl: &str = c_s.to_str().unwrap();
+	
+	let c_l = unsafe { std::ffi::CStr::from_ptr(layer) };
+	let c_ll: &str = c_l.to_str().unwrap();
+
+	let flags = vkraw::VkDebugReportFlagsEXT::from_bits_truncate(flags as u32);
+	let obj_type: vkraw::VkDebugReportObjectTypeEXT = unsafe { std::mem::transmute(otype) };
+	
+	println!("f:{:?}, ot:{:?}, o:{:?}, loc:{:?}, c:{:?}, l:{:?}:\n {}", flags, obj_type, srco, loc, msgcode, c_ll, c_sl);
+
+	return false;
+}
+
 fn main() {
 
 	// Create the instance, potentially enabling the validation layers
@@ -119,20 +212,25 @@ fn main() {
 			std::ffi::CString::new("VK_LAYER_LUNARG_standard_validation").unwrap()
 		];
 		let enabled_extensions_rust = vec![
+			std::ffi::CString::new("VK_EXT_debug_report").unwrap(),
 			std::ffi::CString::new("VK_KHR_surface").unwrap(),
-			std::ffi::CString::new("VK_KHR_xcb_surface").unwrap()
+			#[cfg(feature = "xcb")]
+			std::ffi::CString::new("VK_KHR_xcb_surface").unwrap(),
+			#[cfg(feature = "winapi")]
+			std::ffi::CString::new("VK_KHR_win32_surface").unwrap()
 		];
 
-#[cfg(debug_assertions)]
+		#[cfg(debug_assertions)]
 		let enabled_layers: Vec<*const u8> = vec![
 			enabled_layers_rust[0].as_ptr() as *const u8
 		];
-#[cfg(not(debug_assertions))]
+		#[cfg(not(debug_assertions))]
 		let enabled_layers: Vec<*const u8> = vec![
 		];
 		let enabled_extensions: Vec<*const u8> = vec![
 			enabled_extensions_rust[0].as_ptr() as *const u8,
-			enabled_extensions_rust[1].as_ptr() as *const u8
+			enabled_extensions_rust[1].as_ptr() as *const u8,
+			enabled_extensions_rust[2].as_ptr() as *const u8
 		];
 
 		let app_name = std::ffi::CString::new("app name").unwrap();
@@ -167,6 +265,21 @@ fn main() {
 
 	// This will load all of the extension function pointers that we know about
 	let vk = vkraw::VulkanFunctionPointers::new(instance);
+		
+	unsafe {
+		let rust_fptr = debug_message_callback;
+		let c_fptr: vkraw::PFN_vkDebugReportCallbackEXT = rust_fptr as *const libc::c_void;
+		let mut callback: vkraw::VkDebugReportCallbackEXT = std::mem::uninitialized();
+		let drcci = vkraw::VkDebugReportCallbackCreateInfoEXT {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT,
+			pNext: std::ptr::null(),
+			flags: vkraw::VkDebugReportFlagBitsEXT::all() & !vkraw::VkDebugReportFlagBitsEXT::VK_DEBUG_REPORT_INFORMATION_BIT_EXT,
+			pfnCallback: c_fptr,
+			pUserData: std::ptr::null_mut()
+		};
+		res = vk.CreateDebugReportCallbackEXT.unwrap()(instance, &drcci, ptr::null(), &mut callback);
+		assert!(res == vkraw::VkResult::VK_SUCCESS);
+	};
 
 	let mut num_physical_devices = 0;
 
@@ -174,16 +287,18 @@ fn main() {
 		vkraw::vkEnumeratePhysicalDevices(instance, &mut num_physical_devices, 0 as *mut u64);
 	}
 	assert!(num_physical_devices > 0);
+	
+	let use_physical_device = 0;
 
 	println!("Found {} physical devices", num_physical_devices);
+	println!("Using physical device {}", use_physical_device);
 
-	num_physical_devices = std::cmp::min(1, num_physical_devices);
-	println!("Using physical device 0");
-
-	let mut physical_device: vkraw::VkPhysicalDevice = 0;
+	let mut physical_devices = Vec::<vkraw::VkPhysicalDevice>::with_capacity(num_physical_devices as usize);
 	unsafe {
-		vkraw::vkEnumeratePhysicalDevices(instance, &mut num_physical_devices, &mut physical_device);
+		vkraw::vkEnumeratePhysicalDevices(instance, &mut num_physical_devices, physical_devices.as_mut_ptr());
+		physical_devices.set_len(num_physical_devices as usize);
 	}
+	let physical_device: vkraw::VkPhysicalDevice = physical_devices[use_physical_device];
 
 	assert!(physical_device != vkraw::VK_NULL_HANDLE);
 
@@ -199,24 +314,28 @@ fn main() {
 	// Create the window system
 	let wsi_info = create_wsi(instance, &vk);
 
-	let (wm_protocols, wm_delete_window) = {
-		let pc = xcb::intern_atom(&wsi_info.0, false, "WM_PROTOCOLS");
-		let dwc = xcb::intern_atom(&wsi_info.0, false, "WM_DELETE_WINDOW");
-
-		let p = match pc.get_reply() {
-			Ok(p) => p.atom(),
-			Err(_) => panic!("could not load WM_PROTOCOLS atom")
-		};
-		let dw = match dwc.get_reply() {
-			Ok(dw) => dw.atom(),
-			Err(_) => panic!("could not load WM_DELETE_WINDOW atom")
-		};
-		(p, dw)
-	};
-
+	#[cfg(feature = "xcb")]
 	let protocols = [wm_delete_window];
-	xcb::change_property(&wsi_info.0, xcb::PROP_MODE_REPLACE as u8, wsi_info.1, wm_protocols, xcb::ATOM_ATOM, 32, &protocols);
 
+	#[cfg(feature = "xcb")]
+	{
+		let (wm_protocols, wm_delete_window) = {
+			let pc = xcb::intern_atom(&wsi_info.0, false, "WM_PROTOCOLS");
+			let dwc = xcb::intern_atom(&wsi_info.0, false, "WM_DELETE_WINDOW");
+
+			let p = match pc.get_reply() {
+				Ok(p) => p.atom(),
+				Err(_) => panic!("could not load WM_PROTOCOLS atom")
+			};
+			let dw = match dwc.get_reply() {
+				Ok(dw) => dw.atom(),
+				Err(_) => panic!("could not load WM_DELETE_WINDOW atom")
+			};
+			(p, dw)
+		};
+
+		xcb::change_property(&wsi_info.0, xcb::PROP_MODE_REPLACE as u8, wsi_info.1, wm_protocols, xcb::ATOM_ATOM, 32, &protocols);
+	}
 
 	{
 		// Get present and graphics queue index
@@ -1298,47 +1417,82 @@ fn main() {
 			let mut frame_index = 0;
 
 			let mut rotation = 0.0;
+			
+			let mut quit = false;
 
 			// Render loop
-			loop {
+			while !quit {
 
 				println!("Frame {}", frame_index);
 
-				let event = wsi_info.0.poll_for_event();
-				match event {
-					None => {}
-					Some(event) => {
-						let r = event.response_type() & !0x80;
-						println!("xcb event {:?}", r);
-						match r {
-							xcb::EXPOSE => {
-								println!("Expose");
-							},
-							xcb::KEY_PRESS => {
-								let key_press : &xcb::KeyPressEvent = unsafe {
-									xcb::cast_event(&event)
-								};
-								println!("Key {} pressed", key_press.detail());
-								break;
-							},
-							xcb::CLIENT_MESSAGE => {
-								let cmev = unsafe {
-									xcb::cast_event::<xcb::ClientMessageEvent>(&event)
-								};
-								if cmev.type_() == wm_protocols && cmev.format() == 32 {
-									let protocol = cmev.data().data32()[0];
-									if protocol == wm_delete_window {
-										break;
+
+				#[cfg(feature = "xcb")]
+				{
+					let event = wsi_info.0.poll_for_event();
+					match event {
+						None => {}
+						Some(event) => {
+							let r = event.response_type() & !0x80;
+							println!("xcb event {:?}", r);
+							match r {
+								xcb::EXPOSE => {
+									println!("Expose");
+								},
+								xcb::KEY_PRESS => {
+									let key_press : &xcb::KeyPressEvent = unsafe {
+										xcb::cast_event(&event)
+									};
+									println!("Key {} pressed", key_press.detail());
+									break;
+								},
+								xcb::CLIENT_MESSAGE => {
+									let cmev = unsafe {
+										xcb::cast_event::<xcb::ClientMessageEvent>(&event)
+									};
+									if cmev.type_() == wm_protocols && cmev.format() == 32 {
+										let protocol = cmev.data().data32()[0];
+										if protocol == wm_delete_window {
+											println!("wm_delete_window");
+											quit = true;
+											break;
+										}
 									}
-								}
-							},
-							_ => {}
+								},
+								_ => {}
+							}
 						}
 					}
+				}
+				#[cfg(feature = "winapi")]
+				unsafe {
+					let mut message: winapi::um::winuser::MSG = std::mem::uninitialized();
+
+					while winapi::um::winuser::PeekMessageW(&mut message as *mut winapi::um::winuser::MSG, ptr::null_mut(), 0, 0, winapi::um::winuser::PM_REMOVE) > 0 {
+						winapi::um::winuser::TranslateMessage(&message as *const winapi::um::winuser::MSG);
+						winapi::um::winuser::DispatchMessageW(&message as *const winapi::um::winuser::MSG);
+						if message.message == winapi::um::winuser::WM_QUIT {
+							println!("WM_QUIT");
+							quit = true;
+							break;
+						}
+					}
+					
+					if winapi::um::winuser::IsIconic(wsi_info.0) > 0 {
+						continue;
+					}
+				}
+				
+				if quit {
+					println!("WSI requested quit");
+					break;
 				}
 
 				assert!(vk.AcquireNextImageKHR.is_some());
 				res = vk.AcquireNextImageKHR.unwrap()(device, swapchain, std::u64::MAX, present_complete_sem, vkraw::VK_NULL_HANDLE, &mut current_buffer);
+				if res != vkraw::VkResult::VK_SUCCESS {
+					println!("Acquire returned {:?}, breaking", res);
+					break;
+				}
 				assert!(res == vkraw::VkResult::VK_SUCCESS);
 
 				if frame_index > 1 {

@@ -1,11 +1,8 @@
 
-extern crate vkraw;
-
 #[cfg(test)]
 mod tests {
 
 	use std::ptr;
-	use vkraw;
 	use std::vec;
 	use std;
 /*

@@ -1,8 +1,4 @@
 
-extern crate quick_xml;
-extern crate regex;
-extern crate inflector;
-
 use quick_xml::reader::Reader;
 use quick_xml::events::Event;
 use std::fmt::Write;
@@ -445,6 +441,11 @@ if require_feature == "" {
 						} else if matching_what[0] == "require" && matching_what[1] == "feature" {
 							let name = if let Some(name) = attributes.get("name") { name.to_string() } else { "".to_string() };
 							features.last_mut().unwrap().contents.push(FeatureContent::Type(name.to_string()));
+						} else if matching_what[0] == "require" && matching_what[1] == "extension" {
+
+							if let Some(name) = attributes.get("name") {
+								extensions.last_mut().unwrap().types.push(ExtensionNewType::Type(name.to_string()));
+							}
 						}
 
 
@@ -691,15 +692,11 @@ if require_feature == "" {
 #![feature(const_fn)]
 #![feature(untagged_unions)]
 
-extern crate libc;
 #[macro_use]
 extern crate bitflags;
 
 use std::mem;
 use libc::{c_void};
-
-#[cfg(feature="xcb")]
-extern crate xcb;
 
 pub const VK_VERSION_1_0: u32 = 1;
 
@@ -831,6 +828,7 @@ pub union VkClearValue {
 								if *extends == e.name {
 									if once {
 										write!(output, "\n\t// {}\n", ext.name).expect("Failed to write");
+										write!(output, "\n#[cfg(feature = \"{}\")]\n", ext.name).expect("Failed to write");
 										once = false;
 									}
 									write!(output, "\t{} = {}{},\n", name, dir, extension_base_number + (ext.number - 1) * extension_block_size + offset).expect("Failed to write");
@@ -880,7 +878,38 @@ pub union VkClearValue {
 
 		// Print structs
 		for s in structs {
-			write!(output, "#[derive(Copy, Clone)]\n#[repr(C)]\npub struct {} {{\n{}\n}}\n", s.0, s.1).expect("Failed to write");
+			
+			let mut was_ext = false;
+			
+			// TODO: probably should use a hash map here
+			for ext in &extensions {
+
+				if ext.supported != "disabled" {
+
+					let mut once = true;
+					for ext_enum in &ext.types {
+
+						match *ext_enum {
+							ExtensionNewType::Type(ref name) => {
+								if *name == s.0 {
+									if once {
+										write!(output, "\n// {}\n", ext.name).expect("Failed to write");
+										write!(output, "#[cfg(feature = \"{}\")]\n", ext.name).expect("Failed to write");
+										once = false;
+									}
+									write!(output, "#[derive(Copy, Clone)]\n#[repr(C)]\npub struct {} {{\n{}\n}}\n", s.0, s.1).expect("Failed to write");
+									was_ext = true;
+								}
+							},
+							_ => ()
+						}
+					}
+				}
+			}
+			
+			if !was_ext {
+				write!(output, "#[derive(Copy, Clone)]\n#[repr(C)]\npub struct {} {{\n{}\n}}\n", s.0, s.1).expect("Failed to write");
+			}
 		}
 
 		// Print functions
@@ -928,6 +957,7 @@ pub union VkClearValue {
 									write!(output, "\n\t\t// {}\n", ext.name).expect("Failed to write");
 									once = false;
 								}
+								write!(output, "\n#[cfg(feature = \"{}\")]\n", ext.name).expect("Failed to write");
 								write!(output, "\t\tpub {}: Option<extern \"C\" fn({}) -> {}>,\n", name.replace("vk", ""), cmd.0, cmd.1).expect("Failed to write");
 							}
 						},
@@ -955,6 +985,7 @@ pub union VkClearValue {
 									write!(output, "\n\t\t\t// {}\n", ext.name).expect("Failed to write");
 									once = false;
 								}
+								write!(output, "\n#[cfg(feature = \"{}\")]\n", ext.name).expect("Failed to write");
 								write!(output, "\t\t\t{}: unsafe {{ mem::transmute::<*const c_void,Option<extern \"C\" fn({}) -> {}>>(vkGetInstanceProcAddr(instance, \"{}\\0\".as_ptr())) }},\n", name.replace("vk", ""), cmd.0, cmd.1, name).expect("Failed to write");
 							}
 						},

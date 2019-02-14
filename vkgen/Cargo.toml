@@ -5,6 +5,7 @@ authors = ["Ashley Smith <ashleysmithgpu@gmail.com>"]
 description = "Generates a rust FFI interface to Vulkan"
 repository = "https://github.com/ashleysmithgpu/rust_vulkan_api_generator"
 keywords = ["vulkan"]
+edition = "2018"
 
 [dependencies]
 quick-xml = "0.8.0"

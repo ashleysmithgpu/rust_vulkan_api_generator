@@ -8,7 +8,14 @@ fn main() {
 	Command::new("cargo").current_dir("../vkgen").args(&["build"]).status().unwrap();
 
 	// Run the generator
-	let exe_path = Path::new("../vkgen/target/debug/vkgen");
+	let exe_path;
+	if cfg!(unix) {
+		exe_path = Path::new("../vkgen/target/debug/vkgen");
+	} else if cfg!(windows) {
+		exe_path = Path::new("../vkgen/target/debug/vkgen.exe");
+	} else {
+		panic!("Unknown system");
+	}
 	let xml_path = Path::new("../vkgen/vk.xml");
 	let out_path = Path::new("src/lib.rs");
 
@@ -20,5 +27,11 @@ fn main() {
 	// Link against the libvulkan.so from the loader
 	// TODO: should we take over the loader functionality?
 	// TODO: should we link dynamically?
-	println!("cargo:rustc-link-search=/home/ash/github/Vulkan-LoaderAndValidationLayers/build/loader");
+	if cfg!(unix) {
+		println!("cargo:rustc-link-search=/home/ash/github/Vulkan-LoaderAndValidationLayers/build/loader");
+	} else if cfg!(windows) {
+		println!("cargo:rustc-link-search=C:\\Users\\ash\\Documents\\GitHub\\Vulkan-Loader\\build\\loader\\Debug");
+	} else {
+		panic!("Unknown system");
+	}
 }
