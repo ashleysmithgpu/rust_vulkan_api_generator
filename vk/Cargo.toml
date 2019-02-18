@@ -5,20 +5,19 @@ authors = ["Ashley Smith <ashleysmithgpu@gmail.com>"]
 description = "Wrapped interface to Vulkan in rust"
 repository = "https://github.com/ashleysmithgpu/rust_vulkan_api_generator"
 keywords = ["vulkan"]
-
-[features]
-default = ["xcb"]
+edition = "2018"
 
 [dependencies]
 libc = "0.2.24"
-bitflags = "1.0"
-vkraw = { path = "../vkraw", version = "0.0.1" }
 
-xcb = { version = "0.8", optional = true }
+[target."cfg(windows)".dependencies]
+vkraw = { path = "../vkraw", version = "0.0.1", features = ["VK_KHR_win32_surface"] }
+winapi = { version = "0.3.6", features = ["winuser", "libloaderapi"] }
 
-[dev-dependencies]
-glm = "0.2.3"
-num = "0.1.36"
+# Enable after issue fixed: https://github.com/rust-lang/cargo/issues/2524
+#[target.'cfg(unix)'.dependencies]
+#vkraw = { path = "../vkraw", version = "0.0.1", features = ["VK_KHR_xcb_surface"] }
+
 
 # TODO: need to build the bin target first, cargo does not support this
 

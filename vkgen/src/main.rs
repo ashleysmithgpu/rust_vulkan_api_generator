@@ -168,6 +168,7 @@ fn main() {
 	let mut struct_member_ptr_ptr = false;
 	let mut struct_member_const = false;
 	let mut struct_members = String::new();
+	let mut struct_contains_arrays = false;
 	let mut struct_member_array = false;
 	let mut struct_member_array_size = String::new();
 
@@ -212,8 +213,8 @@ fn main() {
 	}
 	let mut bitflags = Vec::<Bitflags>::new();
 
-	// name, members
-	let mut structs = Vec::<(String, String)>::new();
+	// name, members, contains arrays
+	let mut structs = Vec::<(String, String, bool)>::new();
 
 	// Features
 	enum FeatureContent {
@@ -571,6 +572,7 @@ if require_feature == "" {
 										if struct_member_const { if struct_member_ptr { "const" } else { "" } } else { if struct_member_ptr { "mut" } else { "" } },
 										struct_member_type,
 										struct_member_array_size)).expect("Could not format string");
+									struct_contains_arrays = true;
 								} else {
 									struct_members.write_fmt(format_args!("\tpub {}: {}{}{}{} {},\n",
 										struct_member_name,
@@ -588,6 +590,7 @@ if require_feature == "" {
 										if struct_member_const { if struct_member_ptr { "const" } else { "" } } else { if struct_member_ptr { "mut" } else { "" } },
 										struct_member_type,
 										struct_member_array_size)).expect("Could not format string");
+									struct_contains_arrays = true;
 								} else {
 									struct_members.write_fmt(format_args!("\tpub {}: {}{} {},\n",
 										struct_member_name,
@@ -657,12 +660,13 @@ if require_feature == "" {
 								} else if type_category == "handle" {
 									handle_types.push(type_name.clone());
 								} else if type_category == "struct" && !struct_members.is_empty() {
-									structs.push((struct_name.clone(), struct_members.clone()));
+									structs.push((struct_name.clone(), struct_members.clone(), struct_contains_arrays));
 								} else if type_category == "define" {
 									define_types.push((type_name.clone(), define_type_value.clone()));
 									define_type_value.clear();
 								}
 								struct_members.clear();
+								struct_contains_arrays = false;
 							}
 						}
 					},
@@ -760,6 +764,44 @@ pub union VkClearColorValue {
 pub union VkClearValue {
 	pub colour: VkClearColorValue,
 	pub depthStencil: VkClearDepthStencilValue
+}
+
+impl std::fmt::Debug for VkClearColorValue {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		unsafe { write!(f, "VkClearColorValue {{float32: {:?}; or int32: {:?}; or uint32: {:?}}}", self.float32, self.int32, self.uint32) }
+	}
+}
+
+impl std::fmt::Debug for VkClearValue {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		unsafe { write!(f, "VkClearValue {{colour: {:?}; or depthStencil: {:?}}}", self.colour, self.depthStencil) }
+	}
+}
+
+// TODO
+// Cannot implement Debug for [u8; x > 32]
+impl std::fmt::Debug for VkPhysicalDeviceProperties {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		write!(f, "not implemented")
+	}
+}
+
+impl std::fmt::Debug for VkLayerProperties {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		write!(f, "not implemented")
+	}
+}
+
+impl std::fmt::Debug for VkExtensionProperties {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		write!(f, "not implemented")
+	}
+}
+
+impl std::fmt::Debug for VkPhysicalDeviceMemoryProperties {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		write!(f, "not implemented")
+	}
 }"#;
 	{
 		use std::io::Write;
@@ -897,7 +939,12 @@ pub union VkClearValue {
 										write!(output, "#[cfg(feature = \"{}\")]\n", ext.name).expect("Failed to write");
 										once = false;
 									}
-									write!(output, "#[derive(Copy, Clone)]\n#[repr(C)]\npub struct {} {{\n{}\n}}\n", s.0, s.1).expect("Failed to write");
+									// Can't use automatic Debug since rust disallows this for arrays > 32
+									if s.2 {
+										write!(output, "#[derive(Copy, Clone)]\n#[repr(C)]\npub struct {} {{\n{}\n}}\n", s.0, s.1).expect("Failed to write");
+									} else {
+										write!(output, "#[derive(Debug, Copy, Clone)]\n#[repr(C)]\npub struct {} {{\n{}\n}}\n", s.0, s.1).expect("Failed to write");
+									}
 									was_ext = true;
 								}
 							},
@@ -908,7 +955,12 @@ pub union VkClearValue {
 			}
 			
 			if !was_ext {
-				write!(output, "#[derive(Copy, Clone)]\n#[repr(C)]\npub struct {} {{\n{}\n}}\n", s.0, s.1).expect("Failed to write");
+				// Can't use automatic Debug since rust disallows this for arrays > 32
+				if s.2 {
+					write!(output, "#[derive(Copy, Clone)]\n#[repr(C)]\npub struct {} {{\n{}\n}}\n", s.0, s.1).expect("Failed to write");
+				} else {
+					write!(output, "#[derive(Debug, Copy, Clone)]\n#[repr(C)]\npub struct {} {{\n{}\n}}\n", s.0, s.1).expect("Failed to write");
+				}
 			}
 		}
 
