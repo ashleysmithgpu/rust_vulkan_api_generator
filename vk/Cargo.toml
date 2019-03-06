@@ -18,6 +18,8 @@ winapi = { version = "0.3.6", features = ["winuser", "libloaderapi"] }
 #[target.'cfg(unix)'.dependencies]
 #vkraw = { path = "../vkraw", version = "0.0.1", features = ["VK_KHR_xcb_surface"] }
 
+[dev-dependencies]
+glm = "0.2.3"
 
 # TODO: need to build the bin target first, cargo does not support this
 

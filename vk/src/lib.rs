@@ -11,11 +11,18 @@ fn win32_string(value: &str) -> Vec<u16> {
 
 pub struct Instance {
 	pub instance: vkraw::VkInstance,
-	vk: vkraw::VulkanFunctionPointers
+	vk: vkraw::VulkanFunctionPointers,
+	callback: vkraw::VkDebugReportCallbackEXT,
 }
 
-pub struct Device {
-	pub device: vkraw::VkDevice
+pub struct Device<'a> {
+	pub device: vkraw::VkDevice,
+	pub instance: &'a Instance
+}
+
+pub struct Buffer<'a> {
+	pub buffer: vkraw::VkBuffer,
+	pub device: &'a Device<'a>
 }
 
 pub struct Surface<'a> {
@@ -23,9 +30,14 @@ pub struct Surface<'a> {
 	instance: &'a Instance
 }
 
-#[derive(Debug)]
-pub struct PhysicalDevice {
-	pub physical_device: vkraw::VkPhysicalDevice
+pub struct PhysicalDevice<'a> {
+	pub physical_device: vkraw::VkPhysicalDevice,
+	pub instance: &'a Instance
+}
+
+pub struct Swapchain<'a, 'b> {
+	pub swapchain: vkraw::VkSwapchainKHR,
+	pub device: &'a Device<'b>
 }
 
 fn debug_message_callback(flags: libc::c_int, otype: libc::c_int, srco: u64, loc: usize, msgcode: u32, layer: *const libc::c_char, msg: *const libc::c_char, _userdata: *mut libc::c_void) -> bool {
@@ -61,6 +73,11 @@ impl Default for InstanceBuilder {
 			layers: vec![ 
 				#[cfg(debug_assertions)]
 				"VK_LAYER_LUNARG_standard_validation".to_string(),
+				//"VkLayer_core_validation".to_string(),
+				//"VkLayer_object_lifetimes".to_string(),
+				//"VkLayer_stateless_validation".to_string(),
+				//"VkLayer_thread_safety".to_string(),
+				//"VkLayer_unique_objects".to_string(),
 			],
 			extensions: vec![
 				#[cfg(debug_assertions)]
@@ -141,10 +158,11 @@ impl InstanceBuilder {
 		if res == vkraw::VkResult::VK_SUCCESS {
 			assert!(instance != vkraw::VK_NULL_HANDLE);
 
+			let mut callback: vkraw::VkDebugReportCallbackEXT;
 			unsafe {
+				callback = std::mem::uninitialized();
 				let rust_fptr = debug_message_callback;
 				let c_fptr: vkraw::PFN_vkDebugReportCallbackEXT = rust_fptr as *const libc::c_void;
-				let mut callback: vkraw::VkDebugReportCallbackEXT = std::mem::uninitialized();
 				let drcci = vkraw::VkDebugReportCallbackCreateInfoEXT {
 					sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT,
 					pNext: std::ptr::null(),
@@ -156,7 +174,7 @@ impl InstanceBuilder {
 				assert!(res2 == vkraw::VkResult::VK_SUCCESS);
 			};
 			
-			Ok(Instance { instance: instance, vk: vk })
+			Ok(Instance { instance: instance, vk: vk, callback: callback })
 		} else {
 			Err(res)
 		}
@@ -167,6 +185,8 @@ impl Drop for Instance {
 	fn drop(&mut self) {
 		assert!(self.instance != vkraw::VK_NULL_HANDLE);
 		unsafe {
+			self.vk.DestroyDebugReportCallbackEXT.unwrap()(self.instance, self.callback, ptr::null());
+		
 			println!("vkDestroyInstance");
 			vkraw::vkDestroyInstance(self.instance, ptr::null());
 		}
@@ -200,14 +220,15 @@ impl Instance {
 			assert!(d != vkraw::VK_NULL_HANDLE);
 
 			physical_devices.push(PhysicalDevice {
-				physical_device: d
+				physical_device: d,
+				instance: &self
 			});
 		}
 		return physical_devices;
 	}
 
 	#[cfg(unix)]
-	pub fn create_wsi(&self, vk: &vkraw::VulkanFunctionPointers, width: u32, height: u32) -> (Surface, xcb::Connection, u32) {
+	pub fn create_wsi(&self, width: u32, height: u32) -> (Surface, xcb::Connection, u32) {
 
 		assert!(width <= std::u16::MAX as u32);
 		assert!(height <= std::u16::MAX as u32);
@@ -245,8 +266,8 @@ impl Instance {
 				window: win
 			};
 
-			assert!(vk.CreateXcbSurfaceKHR.is_some());
-			let res = vk.CreateXcbSurfaceKHR.unwrap()(self.instance, &surface_create_info, ptr::null(), &mut surface);
+			assert!(self.vk.CreateXcbSurfaceKHR.is_some());
+			let res = self.vk.CreateXcbSurfaceKHR.unwrap()(self.instance, &surface_create_info, ptr::null(), &mut surface);
 			assert!(res == vkraw::VkResult::VK_SUCCESS);
 		}
 
@@ -254,7 +275,7 @@ impl Instance {
 	}
 
 	#[cfg(windows)]
-	pub fn create_wsi(&self, vk: &vkraw::VulkanFunctionPointers, width: u32, height: u32) -> (Surface, winapi::shared::windef::HWND, winapi::shared::minwindef::HINSTANCE) {
+	pub fn create_wsi(&self, width: u32, height: u32) -> (Surface, winapi::shared::windef::HWND, winapi::shared::minwindef::HINSTANCE) {
 
 		let hinstance;
 		let handle;
@@ -316,9 +337,9 @@ impl Instance {
 			winapi::um::winuser::SetForegroundWindow(handle);
 			winapi::um::winuser::SetFocus(handle);
 
-			assert!(vk.CreateWin32SurfaceKHR.is_some());
+			assert!(self.vk.CreateWin32SurfaceKHR.is_some());
 			println!("vk.CreateWin32SurfaceKHR");
-			let res = vk.CreateWin32SurfaceKHR.unwrap()(self.instance, &surface_create_info, ptr::null(), &mut surface);
+			let res = self.vk.CreateWin32SurfaceKHR.unwrap()(self.instance, &surface_create_info, ptr::null(), &mut surface);
 			assert!(res == vkraw::VkResult::VK_SUCCESS);
 		}
 
@@ -326,7 +347,7 @@ impl Instance {
 	}
 }
 
-impl PhysicalDevice {
+impl<'a> PhysicalDevice<'a> {
 	pub fn queue_families(&self) -> Vec<vkraw::VkQueueFamilyProperties> {
 		let mut num_physical_devices = 0;
 		unsafe {
@@ -350,6 +371,83 @@ impl PhysicalDevice {
 		
 		props
 	}
+	
+	pub fn memory_properties(&self) -> (Vec<vkraw::VkMemoryType>, Vec<vkraw::VkMemoryHeap>) {
+		let mut memory_properties: vkraw::VkPhysicalDeviceMemoryProperties;
+
+		unsafe {
+			memory_properties = mem::uninitialized();
+			vkraw::vkGetPhysicalDeviceMemoryProperties(self.physical_device, &mut memory_properties);
+		}
+		
+		let mut mt = Vec::<vkraw::VkMemoryType>::new();
+		for i in 0..memory_properties.memoryTypeCount {
+			mt.push(memory_properties.memoryTypes[i as usize]);
+		}
+		let mut mh = Vec::<vkraw::VkMemoryHeap>::new();
+		for i in 0..memory_properties.memoryHeapCount {
+			mh.push(memory_properties.memoryHeaps[i as usize]);
+		}
+		
+		(mt, mh)
+	}
+
+	pub fn supported_surface_formats(&self, surface: &Surface) -> Result<Vec<vkraw::VkSurfaceFormatKHR>, vkraw::VkResult> {
+
+		// Get a supported colour format and colour space
+		let mut format_count = 0;
+		assert!(self.instance.vk.GetPhysicalDeviceSurfaceFormatsKHR.is_some());
+		self.instance.vk.GetPhysicalDeviceSurfaceFormatsKHR.unwrap()(self.physical_device, surface.surface, &mut format_count, ptr::null_mut());
+
+		let mut surface_formats = Vec::<vkraw::VkSurfaceFormatKHR>::with_capacity(format_count as usize);
+		unsafe {
+			surface_formats.set_len(format_count as usize);
+		}
+		assert!(self.instance.vk.GetPhysicalDeviceSurfaceFormatsKHR.is_some());
+		let res = self.instance.vk.GetPhysicalDeviceSurfaceFormatsKHR.unwrap()(self.physical_device, surface.surface, &mut format_count, surface_formats.as_mut_ptr());
+		
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(surface_formats)
+		} else {
+			Err(res)
+		}
+	}
+	
+	pub fn surface_capabilities(&self, surface: &Surface) -> Result<vkraw::VkSurfaceCapabilitiesKHR, vkraw::VkResult> {
+		let mut surface_capabilities: vkraw::VkSurfaceCapabilitiesKHR;
+		unsafe {
+			surface_capabilities = std::mem::uninitialized();
+		}
+		assert!(self.instance.vk.GetPhysicalDeviceSurfaceCapabilitiesKHR.is_some());
+		let res = self.instance.vk.GetPhysicalDeviceSurfaceCapabilitiesKHR.unwrap()(self.physical_device, surface.surface, &mut surface_capabilities);
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(surface_capabilities)
+		} else {
+			Err(res)
+		}
+	}
+	
+	pub fn present_modes(&self, surface: &Surface) -> Result<Vec<vkraw::VkPresentModeKHR>, vkraw::VkResult> {
+
+		let mut present_mode_count = 0;
+		assert!(self.instance.vk.GetPhysicalDeviceSurfacePresentModesKHR.is_some());
+		let mut res = self.instance.vk.GetPhysicalDeviceSurfacePresentModesKHR.unwrap()(self.physical_device, surface.surface, &mut present_mode_count, ptr::null_mut());
+		if res != vkraw::VkResult::VK_SUCCESS {
+			return Err(res)
+		}
+		assert!(present_mode_count > 0);
+		let mut present_modes = Vec::<vkraw::VkPresentModeKHR>::with_capacity(present_mode_count as usize);
+		unsafe {
+			present_modes.set_len(present_mode_count as usize);
+		}
+		assert!(self.instance.vk.GetPhysicalDeviceSurfacePresentModesKHR.is_some());
+		res = self.instance.vk.GetPhysicalDeviceSurfacePresentModesKHR.unwrap()(self.physical_device, surface.surface, &mut present_mode_count, present_modes.as_mut_ptr());
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(present_modes)
+		} else {
+			Err(res)
+		}
+	}
 }
 
 pub struct DeviceBuilder<'a> {
@@ -357,7 +455,7 @@ pub struct DeviceBuilder<'a> {
 	pub layers: Vec<String>,
 	pub extensions: Vec<String>,
 	pub queue_create_infos: Vec<(u32, Vec<f32>)>,
-	pub physical_device: Option<(PhysicalDevice, usize)> // Physical device and index
+	pub physical_device: Option<(PhysicalDevice<'a>, usize)> // Physical device and index
 }
 
 impl<'a> DeviceBuilder<'a> {
@@ -374,7 +472,7 @@ impl<'a> DeviceBuilder<'a> {
 			physical_device: None
 		}
 	}
-	pub fn default_queues_physical_device<'b>(&'b mut self, surface: &Surface) -> &'b DeviceBuilder<'a> {
+	pub fn default_queues_physical_device<'y>(&'y mut self, surface: &Surface) -> &'y mut Self {
 
 		let physical_devices = self.instance.physical_devices();
 		assert!(physical_devices.len() > 0);
@@ -421,7 +519,7 @@ impl<'a> DeviceBuilder<'a> {
 
 				// Return the first physical device that has at least one of each queue family
 				if graphics_queue_family_index.len() > 0 && compute_queue_family_index.len() > 0 && transfer_queue_family_index.len() > 0 {
-					Some((PhysicalDevice { physical_device: device.physical_device }, device_index))
+					Some((PhysicalDevice { physical_device: device.physical_device, instance: &self.instance }, device_index))
 				} else {
 					None
 				}
@@ -440,7 +538,7 @@ impl<'a> DeviceBuilder<'a> {
 		
 		self
 	}
-	pub fn create_device(&self) -> Result<Device, vkraw::VkResult> {
+	pub fn create_device(&self) -> Result<Device<'a>, vkraw::VkResult> {
 
 		let mut device: vkraw::VkDevice = 0;
 
@@ -500,14 +598,14 @@ impl<'a> DeviceBuilder<'a> {
 
 			assert!(device != vkraw::VK_NULL_HANDLE);
 			assert!(res == vkraw::VkResult::VK_SUCCESS);
-			Ok(Device { device: device })
+			Ok(Device { device: device, instance: self.instance })
 		} else {
 			Err(res)
 		}
 	}
 }
 
-impl Drop for Device {
+impl<'a> Drop for Device<'a> {
 	fn drop(&mut self) {
 		assert!(self.device != vkraw::VK_NULL_HANDLE);
 		unsafe {
@@ -517,7 +615,7 @@ impl Drop for Device {
 	}
 }
 
-impl Device {
+impl<'a> Device<'a> {
 	pub fn get_queue(&self, queue_family_index: u32, queue_index: u32) -> vkraw::VkQueue {
 		let mut queue;
 		unsafe {
@@ -527,6 +625,30 @@ impl Device {
 		}
 		assert!(queue != vkraw::VK_NULL_HANDLE);
 		queue
+	}
+	pub fn create_buffer(&self, size: usize, flags: vkraw::VkBufferUsageFlags) -> Result<Buffer, vkraw::VkResult> {
+		let buf_create_info = vkraw::VkBufferCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: vkraw::VkBufferCreateFlags::_EMPTY,
+			size: size as u64,
+			usage: flags,
+			sharingMode: vkraw::VkSharingMode::VK_SHARING_MODE_EXCLUSIVE,
+			queueFamilyIndexCount: 0,
+			pQueueFamilyIndices: ptr::null()
+		};
+
+		let mut buffer: vkraw::VkBuffer = 0;
+		let res;
+		println!("vkCreateBuffer");
+		unsafe {
+			res = vkraw::vkCreateBuffer(self.device, &buf_create_info, ptr::null(), &mut buffer);
+		}
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(Buffer { buffer: buffer, device: &self })
+		} else {
+			Err(res)
+		}
 	}
 }
 
@@ -539,76 +661,176 @@ impl<'a> Drop for Surface<'a> {
 	}
 }
 
-
-/*
-pub trait PinEx<P> {
-	fn new() -> std::pin::Pin<P>;
-}
-
-impl<P, T> PinEx<P> for std::pin::Pin<P> {
-	fn new() -> std::pin::Pin<T> {
-		return std::pin::Pin { pointer: *unsafe { std::mem::transmute::<*mut P,&mut T>(ptr::null_mut()) } };
+impl<'a> Drop for Buffer<'a> {
+	fn drop(&mut self) {
+		println!("vkDestroyBuffer");
+		unsafe {
+			vkraw::vkDestroyBuffer(self.device.device, self.buffer, ptr::null());
+		}
 	}
 }
-*/
 
+pub struct SwapchainBuilder<'a> {
+	device: &'a Device<'a>
+}
+
+impl<'a> SwapchainBuilder<'a> {
+	pub fn new(device: &'a Device) -> SwapchainBuilder<'a> {
+		SwapchainBuilder {
+			device: &device
+		}
+	}
+	pub fn create(&self) -> Result<Swapchain, vkraw::VkResult> {
+		Ok(Swapchain { device: &self.device, swapchain: 0 })
+	}
+}
 
 pub struct MemoryAllocator<'a> {
-	instance: &'a Instance
+	device: &'a Device<'a>
+}
+
+pub fn staging_memory(memory_available: &(Vec<vkraw::VkMemoryType>, Vec<vkraw::VkMemoryHeap>)) -> usize {
+
+	memory_available.0.iter().enumerate().filter_map(
+		|(i, t)|
+		{
+			if t.propertyFlags.intersects(vkraw::VkMemoryPropertyFlags::VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
+				Some(i)
+			} else {
+				None
+			}
+		}).next().expect("Couldn't find a staging memory type")
+}
+
+pub fn gpu_only_memory(memory_available: &(Vec<vkraw::VkMemoryType>, Vec<vkraw::VkMemoryHeap>)) -> usize {
+
+	memory_available.0.iter().enumerate().filter_map(
+		|(i, t)|
+		{
+			if t.propertyFlags.intersects(vkraw::VkMemoryPropertyFlags::VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) {
+				Some(i)
+			} else {
+				None
+			}
+		}).next().expect("Couldn't find a gpu only memory type")
+}
+
+pub fn gpu_to_cpu_memory(memory_available: &(Vec<vkraw::VkMemoryType>, Vec<vkraw::VkMemoryHeap>)) -> usize {
+
+	memory_available.0.iter().enumerate().filter_map(
+		|(i, t)|
+		{
+			if t.propertyFlags.intersects(vkraw::VkMemoryPropertyFlags::VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | vkraw::VkMemoryPropertyFlags::VK_MEMORY_PROPERTY_HOST_CACHED_BIT | vkraw::VkMemoryPropertyFlags::VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) {
+				Some(i)
+			} else {
+				None
+			}
+		}).next().expect("Couldn't find a gpu to cpu memory type")
 }
 
 impl<'a> MemoryAllocator<'a> {
-	pub fn new(instance: &'a Instance) -> MemoryAllocator {
+	pub fn new(device: &'a Device) -> MemoryAllocator<'a> {
 		MemoryAllocator {
-			instance: instance
+			device: device
 		}
 	}
-	pub fn create_mem(&self) -> Mem {
-		println!("Instance::create_mem()");
-		Mem { memory_allocator: self }
-	}
-	/*pub fn create_mem_typed_safe<T>(&self, t: T) -> MemSafe<T> {
-		println!("Instance::create_mem()");
-		MemSafe { memory_allocator: self, mem: PinEx::<i32>::new() }
-	}*/
-	pub fn upload(&self, mem: Mem<'a>) {
+	pub fn allocate_buffer_memory(&self, buffer: &Buffer, memory_type_index: usize) -> Result<Mem, vkraw::VkResult> {
 	
-	}
-	/*pub fn upload_typed_safe<T>(&self, mem: MemSafe<'a, T>) {
+		let mut mem_reqs: vkraw::VkMemoryRequirements;
+		unsafe {
+			mem_reqs = std::mem::uninitialized();
+			vkraw::vkGetBufferMemoryRequirements(self.device.device, buffer.buffer, &mut mem_reqs);
+		}
+		let mem_alloc = vkraw::VkMemoryAllocateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+			pNext: ptr::null(),
+			allocationSize: mem_reqs.size,
+			memoryTypeIndex: memory_type_index as u32
+		};
+		let mut memory: vkraw::VkDeviceMemory = 0;
+		let mut res;
+		unsafe {
+			res = vkraw::vkAllocateMemory(self.device.device, &mem_alloc, ptr::null(), &mut memory);
+			assert!(res == vkraw::VkResult::VK_SUCCESS);
+			
+			if res != vkraw::VkResult::VK_SUCCESS {
+				return Err(res)
+			}
+			
+			// TODO: do this here?
+			res = vkraw::vkBindBufferMemory(self.device.device, buffer.buffer, memory, 0);
+			assert!(res == vkraw::VkResult::VK_SUCCESS);
+		}
 	
-	}*/
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(Mem { memory_allocator: self, mem: memory, ptr: 0 })
+		} else {
+			Err(res)
+		}
+	}
 }
 
 // The lifetime specifiers ('a) here say "Mem should live a shorter lifetime than Instance because we have a reference to it"
 pub struct Mem<'a> {
-	memory_allocator: &'a MemoryAllocator<'a>
+	memory_allocator: &'a MemoryAllocator<'a>,
+	mem: vkraw::VkDeviceMemory,
+	ptr: u64
 }
 impl<'a> Mem<'a> {
 	// &mut self means that we can only ever have one MappedMem instance (Cannot map() twice)
-	pub fn map(&mut self) -> MappedMem {
+	pub fn map<T>(&mut self) -> MappedMem<T> {
+
+		let mut data: *mut libc::c_void = ptr::null_mut();
+		let res;
+		unsafe {
+			res = vkraw::vkMapMemory(self.memory_allocator.device.device, self.mem, 0, std::mem::size_of::<T>() as u64, 0, &mut data);
+			assert!(res == vkraw::VkResult::VK_SUCCESS);
+			assert!(data != ptr::null_mut());
+		}
+		self.ptr = data as u64;
 		println!("Mem::map()");
-		MappedMem { mem: self }
+		MappedMem { mem: self, ptr: &self.ptr, _phantom: std::marker::PhantomData }
 	}
 }
 impl<'a> Drop for Mem<'a> {
 	fn drop(&mut self) {
 		println!("Mem::drop()");
+		unsafe {
+			vkraw::vkFreeMemory(self.memory_allocator.device.device, self.mem, ptr::null());
+		}
 	}
 }
 
 // MappedMem should live a shorter lifetime than Mem
-pub struct MappedMem<'a> {
-	mem: &'a Mem<'a>
+pub struct MappedMem<'a, T> {
+	mem: &'a Mem<'a>,
+	ptr: &'a u64,
+	_phantom: std::marker::PhantomData<T>
 }
-impl<'a> MappedMem<'a> {
-	pub fn get_ptr<T>(&mut self) -> *mut T {
-		println!("MappedMem::get_ptr()");
-		0 as *mut T
+impl<'a, T> std::ops::Deref for MappedMem<'a, T> {
+	type Target = T;
+	fn deref(&self) -> &T {
+		unsafe { std::mem::transmute::<u64, &T>(*self.ptr) }
 	}
 }
-impl<'a> Drop for MappedMem<'a> {
+impl<'a, T> std::ops::DerefMut for MappedMem<'a, T> {
+	fn deref_mut(&mut self) -> &mut T {
+		unsafe { std::mem::transmute::<u64, &mut T>(*self.ptr) }
+	}
+}
+impl<'a, T> MappedMem<'a, T> {
+	pub fn get_ptr(&mut self) -> *mut T {
+		println!("MappedMem::get_ptr()");
+		unsafe { std::mem::transmute::<u64, *mut T>(*self.ptr) }
+	}
+}
+impl<'a, T> Drop for MappedMem<'a, T> {
 	fn drop(&mut self) {
 		println!("MappedMem::drop()");
+
+		unsafe {
+			vkraw::vkUnmapMemory(self.mem.memory_allocator.device.device, self.mem.mem);
+		}
 	}
 }
 
