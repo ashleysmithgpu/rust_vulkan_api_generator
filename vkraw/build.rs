@@ -28,7 +28,7 @@ fn main() {
 	// TODO: should we take over the loader functionality?
 	// TODO: should we link dynamically?
 	if cfg!(unix) {
-		println!("cargo:rustc-link-search=/home/ash/github/Vulkan-LoaderAndValidationLayers/build/loader");
+		println!("cargo:rustc-link-search=/home/ash/github/Vulkan-Loader/build/loader");
 	} else if cfg!(windows) {
 		println!("cargo:rustc-link-search=C:\\Users\\ash\\Documents\\GitHub\\Vulkan-Loader\\build\\loader\\Debug");
 	} else {

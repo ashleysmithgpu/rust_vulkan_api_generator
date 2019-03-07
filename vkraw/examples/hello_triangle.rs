@@ -315,11 +315,13 @@ fn main() {
 	let wsi_info = create_wsi(instance, &vk);
 
 	#[cfg(feature = "xcb")]
-	let protocols = [wm_delete_window];
+	let protocols;
+	let wm_delete_window;
+	let wm_protocols;
 
 	#[cfg(feature = "xcb")]
 	{
-		let (wm_protocols, wm_delete_window) = {
+		let (wm_protocols2, wm_delete_window2) = {
 			let pc = xcb::intern_atom(&wsi_info.0, false, "WM_PROTOCOLS");
 			let dwc = xcb::intern_atom(&wsi_info.0, false, "WM_DELETE_WINDOW");
 
@@ -333,6 +335,9 @@ fn main() {
 			};
 			(p, dw)
 		};
+		protocols = [wm_delete_window2];
+		wm_delete_window = wm_delete_window2;
+		wm_protocols = wm_protocols2;
 
 		xcb::change_property(&wsi_info.0, xcb::PROP_MODE_REPLACE as u8, wsi_info.1, wm_protocols, xcb::ATOM_ATOM, 32, &protocols);
 	}

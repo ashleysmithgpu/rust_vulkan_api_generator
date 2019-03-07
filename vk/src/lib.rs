@@ -44,7 +44,7 @@ fn debug_message_callback(flags: libc::c_int, otype: libc::c_int, srco: u64, loc
 
 	let c_s = unsafe { std::ffi::CStr::from_ptr(msg) };
 	let c_sl: &str = c_s.to_str().unwrap();
-	
+
 	let c_l = unsafe { std::ffi::CStr::from_ptr(layer) };
 	let c_ll: &str = c_l.to_str().unwrap();
 
@@ -111,7 +111,7 @@ impl InstanceBuilder {
 		for l in &self.layers {
 			enabled_layers_rust.push(CString::new(l.clone()).unwrap());
 		}
-		
+
 		let mut enabled_extensions_rust = Vec::<CString>::with_capacity(self.extensions.len());
 		for e in &self.extensions {
 			enabled_extensions_rust.push(CString::new(e.clone()).unwrap());
@@ -152,7 +152,7 @@ impl InstanceBuilder {
 		unsafe {
 			res = vkraw::vkCreateInstance(&create_info, ptr::null(), &mut instance);
 		};
-		
+
 		let vk = vkraw::VulkanFunctionPointers::new(instance);
 
 		if res == vkraw::VkResult::VK_SUCCESS {
@@ -173,7 +173,7 @@ impl InstanceBuilder {
 				let res2 = vk.CreateDebugReportCallbackEXT.unwrap()(instance, &drcci, ptr::null(), &mut callback);
 				assert!(res2 == vkraw::VkResult::VK_SUCCESS);
 			};
-			
+
 			Ok(Instance { instance: instance, vk: vk, callback: callback })
 		} else {
 			Err(res)
@@ -186,7 +186,7 @@ impl Drop for Instance {
 		assert!(self.instance != vkraw::VK_NULL_HANDLE);
 		unsafe {
 			self.vk.DestroyDebugReportCallbackEXT.unwrap()(self.instance, self.callback, ptr::null());
-		
+
 			println!("vkDestroyInstance");
 			vkraw::vkDestroyInstance(self.instance, ptr::null());
 		}
@@ -297,9 +297,9 @@ impl Instance {
 				lpszMenuName: std::ptr::null_mut(),
 			};
 			winapi::um::winuser::RegisterClassW(&wnd_class);
-			
+
 			println!("Window {}x{}", width, height);
-			
+
 			let mut window_rect = winapi::shared::windef::RECT {
 				left: 0,
 				top: 0,
@@ -310,7 +310,7 @@ impl Instance {
 			let style = winapi::um::winuser::WS_OVERLAPPEDWINDOW | winapi::um::winuser::WS_CLIPSIBLINGS | winapi::um::winuser::WS_CLIPCHILDREN;
 			let exstyle = winapi::um::winuser::WS_EX_APPWINDOW | winapi::um::winuser::WS_EX_WINDOWEDGE;
 			winapi::um::winuser::AdjustWindowRectEx(&mut window_rect, style, 0, exstyle);
-			
+
 			handle = winapi::um::winuser::CreateWindowExW(
 				0,
 				name.as_ptr(),
@@ -324,7 +324,7 @@ impl Instance {
 				std::ptr::null_mut(),
 				hinstance,
 				std::ptr::null_mut());
-		
+
 			let surface_create_info = vkraw::VkWin32SurfaceCreateInfoKHR {
 				sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
 				pNext: ptr::null(),
@@ -332,7 +332,7 @@ impl Instance {
 				hinstance: hinstance as u64,
 				hwnd: handle as u64
 			};
-			
+
 			winapi::um::winuser::ShowWindow(handle, winapi::um::winuser::SW_SHOW);
 			winapi::um::winuser::SetForegroundWindow(handle);
 			winapi::um::winuser::SetFocus(handle);
@@ -360,18 +360,18 @@ impl<'a> PhysicalDevice<'a> {
 		}
 		return physical_devices;
 	}
-	
+
 	pub fn physical_properties(&self) -> vkraw::VkPhysicalDeviceProperties {
-	
+
 		let mut props: vkraw::VkPhysicalDeviceProperties;
 		unsafe {
 			props = mem::uninitialized();
 			vkraw::vkGetPhysicalDeviceProperties(self.physical_device, &mut props);
 		}
-		
+
 		props
 	}
-	
+
 	pub fn memory_properties(&self) -> (Vec<vkraw::VkMemoryType>, Vec<vkraw::VkMemoryHeap>) {
 		let mut memory_properties: vkraw::VkPhysicalDeviceMemoryProperties;
 
@@ -379,7 +379,7 @@ impl<'a> PhysicalDevice<'a> {
 			memory_properties = mem::uninitialized();
 			vkraw::vkGetPhysicalDeviceMemoryProperties(self.physical_device, &mut memory_properties);
 		}
-		
+
 		let mut mt = Vec::<vkraw::VkMemoryType>::new();
 		for i in 0..memory_properties.memoryTypeCount {
 			mt.push(memory_properties.memoryTypes[i as usize]);
@@ -388,7 +388,7 @@ impl<'a> PhysicalDevice<'a> {
 		for i in 0..memory_properties.memoryHeapCount {
 			mh.push(memory_properties.memoryHeaps[i as usize]);
 		}
-		
+
 		(mt, mh)
 	}
 
@@ -405,14 +405,14 @@ impl<'a> PhysicalDevice<'a> {
 		}
 		assert!(self.instance.vk.GetPhysicalDeviceSurfaceFormatsKHR.is_some());
 		let res = self.instance.vk.GetPhysicalDeviceSurfaceFormatsKHR.unwrap()(self.physical_device, surface.surface, &mut format_count, surface_formats.as_mut_ptr());
-		
+
 		if res == vkraw::VkResult::VK_SUCCESS {
 			Ok(surface_formats)
 		} else {
 			Err(res)
 		}
 	}
-	
+
 	pub fn surface_capabilities(&self, surface: &Surface) -> Result<vkraw::VkSurfaceCapabilitiesKHR, vkraw::VkResult> {
 		let mut surface_capabilities: vkraw::VkSurfaceCapabilitiesKHR;
 		unsafe {
@@ -426,7 +426,7 @@ impl<'a> PhysicalDevice<'a> {
 			Err(res)
 		}
 	}
-	
+
 	pub fn present_modes(&self, surface: &Surface) -> Result<Vec<vkraw::VkPresentModeKHR>, vkraw::VkResult> {
 
 		let mut present_mode_count = 0;
@@ -485,18 +485,18 @@ impl<'a> DeviceBuilder<'a> {
 			|(device_index, device)|
 			{
 				let qf = device.queue_families();
-		
+
 				let mut queue_supports_present = vkraw::VK_FALSE;
-			
+
 				// Loop through each of the family queues in the physical device
 				graphics_queue_family_index = qf.iter().enumerate().filter_map(
 					|(queue_family_index, queue_family)| {
-					
+
 						// TODO: could want to present on the compute queue
 						// Check if this queue supports presenting to the wsi surface
 						assert!(self.instance.vk.GetPhysicalDeviceSurfaceSupportKHR.is_some());
 						self.instance.vk.GetPhysicalDeviceSurfaceSupportKHR.unwrap()(device.physical_device, queue_family_index as u32, surface.surface, &mut queue_supports_present);
-					
+
 						// If we find a matching family, push the index on the Vec
 						if queue_family.queueFlags.intersects(vkraw::VkQueueFlagBits::VK_QUEUE_GRAPHICS_BIT) 
 							&& queue_supports_present == vkraw::VK_TRUE {
@@ -535,7 +535,7 @@ impl<'a> DeviceBuilder<'a> {
 		self.queue_create_infos = vec![(graphics_queue_family_index.first().unwrap().clone() as u32, vec![1.0]),
 			(compute_queue_family_index.last().unwrap().clone() as u32, vec![1.0]),
 			(transfer_queue_family_index.last().unwrap().clone() as u32, vec![1.0])];
-		
+
 		self
 	}
 	pub fn create_device(&self) -> Result<Device<'a>, vkraw::VkResult> {
@@ -563,7 +563,7 @@ impl<'a> DeviceBuilder<'a> {
 		}
 		let mut queue_priorities = Vec::<Vec<f32>>::new();
 		let mut queue_create_infos = Vec::<vkraw::VkDeviceQueueCreateInfo>::new();
-		
+
 		for i in &self.queue_create_infos {
 			queue_priorities.push(i.1.clone());
 			queue_create_infos.push(vkraw::VkDeviceQueueCreateInfo {
@@ -735,7 +735,7 @@ impl<'a> MemoryAllocator<'a> {
 		}
 	}
 	pub fn allocate_buffer_memory(&self, buffer: &Buffer, memory_type_index: usize) -> Result<Mem, vkraw::VkResult> {
-	
+
 		let mut mem_reqs: vkraw::VkMemoryRequirements;
 		unsafe {
 			mem_reqs = std::mem::uninitialized();
@@ -752,16 +752,16 @@ impl<'a> MemoryAllocator<'a> {
 		unsafe {
 			res = vkraw::vkAllocateMemory(self.device.device, &mem_alloc, ptr::null(), &mut memory);
 			assert!(res == vkraw::VkResult::VK_SUCCESS);
-			
+
 			if res != vkraw::VkResult::VK_SUCCESS {
 				return Err(res)
 			}
-			
+
 			// TODO: do this here?
 			res = vkraw::vkBindBufferMemory(self.device.device, buffer.buffer, memory, 0);
 			assert!(res == vkraw::VkResult::VK_SUCCESS);
 		}
-	
+
 		if res == vkraw::VkResult::VK_SUCCESS {
 			Ok(Mem { memory_allocator: self, mem: memory, ptr: 0 })
 		} else {

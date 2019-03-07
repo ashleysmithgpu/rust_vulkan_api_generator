@@ -1,6 +1,4 @@
 
-extern crate vk;
-
 fn main() {
 
 	let instance = vk::InstanceBuilder {
