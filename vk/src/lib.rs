@@ -4,6 +4,7 @@ use colored::*;
 use std::ptr;
 use std::ffi::CString;
 use std::mem;
+use std::io::prelude::*;
 
 #[cfg(windows)]
 fn win32_string(value: &str) -> Vec<u16> {
@@ -61,6 +62,47 @@ pub struct CommandPool<'a> {
 pub struct CommandBuffer<'a> {
 	pub command_buffer: vkraw::VkCommandBuffer,
 	pub command_pool: &'a CommandPool<'a>
+}
+
+pub struct RenderPass<'a> {
+	pub render_pass: vkraw::VkRenderPass,
+	pub device: &'a Device<'a>,
+}
+
+pub struct Framebuffer<'a> {
+	pub framebuffer: vkraw::VkFramebuffer,
+	pub device: &'a Device<'a>,
+}
+
+pub struct Semaphore<'a> {
+	pub semaphore: vkraw::VkSemaphore,
+	pub device: &'a Device<'a>,
+}
+
+pub struct Fence<'a> {
+	pub fence: vkraw::VkFence,
+	pub device: &'a Device<'a>,
+}
+
+pub struct DescriptorSetLayout<'a> {
+	pub dsl: vkraw::VkDescriptorSetLayout,
+	pub device: &'a Device<'a>,
+}
+
+pub struct PipelineLayout<'a> {
+	pub pipeline_layout: vkraw::VkPipelineLayout,
+	pub dsls: Vec<&'a DescriptorSetLayout<'a>>,
+	pub device: &'a Device<'a>,
+}
+
+pub struct Pipeline<'a> {
+	pub pipeline: vkraw::VkPipeline,
+	pub device: &'a Device<'a>,
+}
+
+pub struct ShaderModule<'a> {
+	pub module: vkraw::VkShaderModule,
+	pub device: &'a Device<'a>,
 }
 
 fn debug_message_callback(flags: libc::c_int, otype: libc::c_int, srco: u64, loc: usize, msgcode: u32, layer: *const libc::c_char, msg: *const libc::c_char, _userdata: *mut libc::c_void) -> bool {
@@ -737,6 +779,140 @@ impl<'a> Device<'a> {
 			Err(res)
 		}
 	}
+
+	pub fn create_semaphore(&self) -> Result<Semaphore, vkraw::VkResult> {
+		let sem_create_info = vkraw::VkSemaphoreCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: 0
+		};
+		println!("vkCreateSemaphore");
+		let res;
+		let mut sem: vkraw::VkSemaphore = 0;
+		unsafe {
+			res = vkraw::vkCreateSemaphore(self.device, &sem_create_info, ptr::null(), &mut sem);
+		}
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(Semaphore { semaphore: sem, device: &self })
+		} else {
+			Err(res)
+		}
+	}
+
+	pub fn create_fence(&self) -> Result<Fence, vkraw::VkResult> {
+		let fence_create_info = vkraw::VkFenceCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: vkraw::VkFenceCreateFlags::_EMPTY
+		};
+		println!("vkCreateFence");
+		let res;
+		let mut fence: vkraw::VkFence = 0;
+		unsafe {
+			res = vkraw::vkCreateFence(self.device, &fence_create_info, ptr::null(), &mut fence);
+		}
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(Fence { fence: fence, device: &self })
+		} else {
+			Err(res)
+		}
+	}
+
+	pub fn load_spirv_shader_from_disk(&self, filename: &str) -> Result<ShaderModule, vkraw::VkResult> {
+
+		let mut buffer = Vec::new();
+
+		// Load file contents in to buffer
+		if let Ok(mut f) = std::fs::File::open(filename) {
+			println!("Loaded {}", filename);
+			f.read_to_end(&mut buffer).unwrap();
+		} else if let Ok(mut f) = std::fs::File::open("examples/".to_owned() + filename) {
+			println!("Loaded examples/{}", filename);
+			f.read_to_end(&mut buffer).unwrap();
+		} else {
+			println!("Could not load file {}", filename);
+			return Err(vkraw::VkResult::VK_RESULT_MAX_ENUM)
+		}
+
+		let mut shader_mod: vkraw::VkShaderModule = 0;
+
+		let mod_create_info = vkraw::VkShaderModuleCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: 0,
+			codeSize: buffer.len() as u64,
+			pCode: buffer.as_mut_ptr() as *mut u32
+		};
+
+		let res;
+		unsafe {
+			res = vkraw::vkCreateShaderModule(self.device, &mod_create_info, ptr::null(), &mut shader_mod);
+		}
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(ShaderModule { device: &self, module: shader_mod })
+		} else {
+			Err(res)
+		}
+	}
+}
+
+pub struct ImageBuilder<'a> {
+	pub device: &'a Device<'a>,
+	pub image_type: vkraw::VkImageType,
+	pub format: vkraw::VkFormat,
+	pub extent: vkraw::VkExtent3D,
+	pub mip_levels: usize,
+	pub array_layers: usize,
+	pub samples: vkraw::VkSampleCountFlagBits,
+	pub tiling: vkraw::VkImageTiling,
+	pub usage: vkraw::VkImageUsageFlags
+}
+
+impl<'a> ImageBuilder<'a> {
+	pub fn new(device: &'a Device) -> Self {
+		ImageBuilder {
+			device: device,
+			image_type: vkraw::VkImageType::VK_IMAGE_TYPE_2D,
+			format: vkraw::VkFormat::VK_FORMAT_B8G8R8A8_UNORM,
+			extent: vkraw::VkExtent3D { width: 0, height: 0, depth: 1 },
+			mip_levels: 1,
+			array_layers: 1,
+			samples: vkraw::VkSampleCountFlagBits::VK_SAMPLE_COUNT_1_BIT,
+			tiling: vkraw::VkImageTiling::VK_IMAGE_TILING_OPTIMAL,
+			usage: vkraw::VkImageUsageFlags::VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+		}
+	}
+	pub fn create(&self) -> Result<Image<'a>, vkraw::VkResult> {
+		let image_create_info = vkraw::VkImageCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: vkraw::VkImageCreateFlags::empty(),
+			imageType: self.image_type,
+			format: self.format,
+			extent: self.extent,
+			mipLevels: self.mip_levels as u32,
+			arrayLayers: self.array_layers as u32,
+			samples: self.samples,
+			tiling: self.tiling,
+			usage: self.usage,
+			sharingMode: vkraw::VkSharingMode::VK_SHARING_MODE_EXCLUSIVE,
+			queueFamilyIndexCount: 0,
+			pQueueFamilyIndices: ptr::null(),
+			initialLayout: vkraw::VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED
+		};
+		let res;
+		let mut image: vkraw::VkImage;
+		unsafe {
+			image = std::mem::uninitialized();
+			println!("vkCreateImage");
+			res = vkraw::vkCreateImage(self.device.device, &image_create_info, ptr::null(), &mut image);
+		}
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(Image { device: self.device, image: image, swapchain_image: false })
+		} else {
+			Err(res)
+		}
+	}
 }
 
 impl<'a> Drop for Surface<'a> {
@@ -841,42 +1017,67 @@ impl<'a> Swapchain<'a> {
 	}
 }
 
-impl<'a> Image<'a> {
-	pub fn create_image_view(&self, colour_format: vkraw::VkFormat) -> Result<ImageView, vkraw::VkResult> {
+pub struct ImageViewBuilder<'a> {
+	pub image: &'a Image<'a>,
+	pub view_type: vkraw::VkImageViewType,
+	pub format: vkraw::VkFormat,
+	pub components: vkraw::VkComponentMapping,
+	pub subresource_range: vkraw::VkImageSubresourceRange
+}
 
-		let mut image_view: vkraw::VkImageView;
-		let img_create_info = vkraw::VkImageViewCreateInfo {
-			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-			pNext: ptr::null(),
-			flags: 0,
-			image: self.image,
-			viewType: vkraw::VkImageViewType::VK_IMAGE_VIEW_TYPE_2D,
-			format: colour_format,
+impl<'a> ImageViewBuilder<'a> {
+	pub fn new(image: &'a Image, format: vkraw::VkFormat) -> Self {
+		ImageViewBuilder {
+			image: image,
+			view_type: vkraw::VkImageViewType::VK_IMAGE_VIEW_TYPE_2D,
+			format: format,
 			components: vkraw::VkComponentMapping {
 				r: vkraw::VkComponentSwizzle::VK_COMPONENT_SWIZZLE_R,
 				g: vkraw::VkComponentSwizzle::VK_COMPONENT_SWIZZLE_G,
 				b: vkraw::VkComponentSwizzle::VK_COMPONENT_SWIZZLE_B,
 				a: vkraw::VkComponentSwizzle::VK_COMPONENT_SWIZZLE_A
 			},
-			subresourceRange: vkraw::VkImageSubresourceRange {
+			subresource_range: vkraw::VkImageSubresourceRange {
 				aspectMask: vkraw::VkImageAspectFlags::VK_IMAGE_ASPECT_COLOR_BIT,
 				baseMipLevel: 0,
 				levelCount: 1,
 				baseArrayLayer: 0,
 				layerCount: 1
 			}
+		}
+	}
+
+	pub fn depth_view<'y>(&'y mut self) -> &'y mut Self {
+		self.subresource_range.aspectMask = vkraw::VkImageAspectFlags::VK_IMAGE_ASPECT_DEPTH_BIT;
+		self
+	}
+
+	pub fn create(&self) -> Result<ImageView<'a>, vkraw::VkResult> {
+
+		let mut image_view: vkraw::VkImageView;
+		let img_create_info = vkraw::VkImageViewCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: 0,
+			image: self.image.image,
+			viewType: self.view_type,
+			format: self.format,
+			components: self.components,
+			subresourceRange: self.subresource_range
 		};
 		let res;
 		unsafe{
 			image_view = std::mem::uninitialized();
-			res = vkraw::vkCreateImageView(self.device.device, &img_create_info, ptr::null(), &mut image_view);
+			println!("vkCreateImageView");
+			res = vkraw::vkCreateImageView(self.image.device.device, &img_create_info, ptr::null(), &mut image_view);
 		}
 		if res == vkraw::VkResult::VK_SUCCESS {
-			Ok(ImageView { image: &self, image_view: image_view })
+			Ok(ImageView { image: &self.image, image_view: image_view })
 		} else {
 			Err(res)
 		}
 	}
+
 }
 
 impl<'a> Drop for Swapchain<'a> {
@@ -995,6 +1196,40 @@ impl<'a> MemoryAllocator<'a> {
 			Err(res)
 		}
 	}
+	pub fn allocate_image_memory(&self, image: &Image, memory_type_index: usize) -> Result<Mem, vkraw::VkResult> {
+
+		let mut mem_reqs: vkraw::VkMemoryRequirements;
+		unsafe {
+			mem_reqs = std::mem::uninitialized();
+			vkraw::vkGetImageMemoryRequirements(self.device.device, image.image, &mut mem_reqs);
+		}
+		let mem_alloc = vkraw::VkMemoryAllocateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+			pNext: ptr::null(),
+			allocationSize: mem_reqs.size,
+			memoryTypeIndex: memory_type_index as u32
+		};
+		let mut memory: vkraw::VkDeviceMemory = 0;
+		let mut res;
+		unsafe {
+			res = vkraw::vkAllocateMemory(self.device.device, &mem_alloc, ptr::null(), &mut memory);
+			assert!(res == vkraw::VkResult::VK_SUCCESS);
+
+			if res != vkraw::VkResult::VK_SUCCESS {
+				return Err(res)
+			}
+
+			// TODO: do this here?
+			res = vkraw::vkBindImageMemory(self.device.device, image.image, memory, 0);
+			assert!(res == vkraw::VkResult::VK_SUCCESS);
+		}
+
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(Mem { memory_allocator: self, mem: memory, ptr: 0 })
+		} else {
+			Err(res)
+		}
+	}
 }
 
 // The lifetime specifiers ('a) here say "Mem should live a shorter lifetime than Instance because we have a reference to it"
@@ -1102,6 +1337,417 @@ impl<'a> Drop for CommandBuffer<'a> {
 		println!("vkFreeCommandBuffers");
 		unsafe {
 			vkraw::vkFreeCommandBuffers(self.command_pool.device.device, self.command_pool.command_pool, 1, &self.command_buffer);
+		}
+	}
+}
+
+pub struct RenderPassBuilder<'a> {
+	pub device: &'a Device<'a>,
+	pub subpasses: Vec<vkraw::VkSubpassDescription>,
+	pub dependencies: Vec<vkraw::VkSubpassDependency>,
+	pub attachments: Vec<vkraw::VkAttachmentDescription>,
+	pub attachment_references: Vec<vkraw::VkAttachmentReference>
+}
+
+impl<'a> RenderPassBuilder<'a> {
+	pub fn new(device: &'a Device) -> RenderPassBuilder<'a> {
+		RenderPassBuilder {
+			device: device,
+			subpasses: Vec::<vkraw::VkSubpassDescription>::new(),
+			dependencies: Vec::<vkraw::VkSubpassDependency>::new(),
+			attachments: Vec::<vkraw::VkAttachmentDescription>::new(),
+			attachment_references: Vec::<vkraw::VkAttachmentReference>::new()
+		}
+	}
+
+	pub fn default_single_colour_depth<'y>(&'y mut self, colour_format: vkraw::VkFormat, depth_format: vkraw::VkFormat) -> &'y mut Self {
+
+		self.attachments = vec![
+			vkraw::VkAttachmentDescription {
+				flags: vkraw::VkAttachmentDescriptionFlags::_EMPTY,
+				format: colour_format,
+				samples: vkraw::VkSampleCountFlagBits::VK_SAMPLE_COUNT_1_BIT,
+				loadOp: vkraw::VkAttachmentLoadOp::VK_ATTACHMENT_LOAD_OP_CLEAR,
+				storeOp: vkraw::VkAttachmentStoreOp::VK_ATTACHMENT_STORE_OP_STORE,
+				stencilLoadOp: vkraw::VkAttachmentLoadOp::VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+				stencilStoreOp: vkraw::VkAttachmentStoreOp::VK_ATTACHMENT_STORE_OP_DONT_CARE,
+				initialLayout: vkraw::VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED,
+				finalLayout: vkraw::VkImageLayout::VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+			},
+			vkraw::VkAttachmentDescription {
+				flags: vkraw::VkAttachmentDescriptionFlags::_EMPTY,
+				format: depth_format,
+				samples: vkraw::VkSampleCountFlagBits::VK_SAMPLE_COUNT_1_BIT,
+				loadOp: vkraw::VkAttachmentLoadOp::VK_ATTACHMENT_LOAD_OP_CLEAR,
+				storeOp: vkraw::VkAttachmentStoreOp::VK_ATTACHMENT_STORE_OP_STORE,
+				stencilLoadOp: vkraw::VkAttachmentLoadOp::VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+				stencilStoreOp: vkraw::VkAttachmentStoreOp::VK_ATTACHMENT_STORE_OP_DONT_CARE,
+				initialLayout: vkraw::VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED,
+				finalLayout: vkraw::VkImageLayout::VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+			}
+		];
+
+		self.attachment_references = vec![
+			vkraw::VkAttachmentReference {
+				attachment: 0,
+				layout: vkraw::VkImageLayout::VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+			},
+			vkraw::VkAttachmentReference {
+				attachment: 1,
+				layout: vkraw::VkImageLayout::VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+			}
+		];
+		self.subpasses = vec![
+			vkraw::VkSubpassDescription {
+				flags: vkraw::VkSubpassDescriptionFlags::_EMPTY,
+				pipelineBindPoint: vkraw::VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS,
+				inputAttachmentCount: 0,
+				pInputAttachments: ptr::null(),
+				colorAttachmentCount: 1,
+				pColorAttachments: &self.attachment_references[0],
+				pResolveAttachments: ptr::null(),
+				pDepthStencilAttachment: &self.attachment_references[1],
+				preserveAttachmentCount: 0,
+				pPreserveAttachments: ptr::null()
+			}
+		];
+		self.dependencies = vec![
+			vkraw::VkSubpassDependency {
+				srcSubpass: vkraw::VK_SUBPASS_EXTERNAL as u32,
+				dstSubpass: 0,
+				srcStageMask: vkraw::VkPipelineStageFlags::VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+				dstStageMask: vkraw::VkPipelineStageFlags::VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+				srcAccessMask: vkraw::VkAccessFlags::VK_ACCESS_MEMORY_READ_BIT,
+				dstAccessMask: vkraw::VkAccessFlags::VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | vkraw::VkAccessFlags::VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+				dependencyFlags: vkraw::VkDependencyFlags::VK_DEPENDENCY_BY_REGION_BIT,
+			},
+			vkraw::VkSubpassDependency {
+				srcSubpass: 0,
+				dstSubpass: vkraw::VK_SUBPASS_EXTERNAL as u32,
+				srcStageMask: vkraw::VkPipelineStageFlags::VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+				dstStageMask: vkraw::VkPipelineStageFlags::VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+				srcAccessMask: vkraw::VkAccessFlags::VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | vkraw::VkAccessFlags::VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+				dstAccessMask: vkraw::VkAccessFlags::VK_ACCESS_MEMORY_READ_BIT,
+				dependencyFlags: vkraw::VkDependencyFlags::VK_DEPENDENCY_BY_REGION_BIT,
+			}
+		];
+
+		self
+	}
+
+	pub fn create(&self) -> Result<RenderPass<'a>, vkraw::VkResult> {
+		let render_pass_create_info = vkraw::VkRenderPassCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: 0,
+			attachmentCount: self.attachments.len() as u32,
+			pAttachments: self.attachments.as_ptr(),
+			subpassCount: self.subpasses.len() as u32,
+			pSubpasses: self.subpasses.as_ptr(),
+			dependencyCount: self.dependencies.len() as u32,
+			pDependencies: self.dependencies.as_ptr()
+		};
+
+		let mut render_pass: vkraw::VkRenderPass = 0;
+		let res;
+		println!("vkCreateRenderPass");
+		unsafe {
+			res = vkraw::vkCreateRenderPass(self.device.device, &render_pass_create_info, ptr::null(), &mut render_pass);
+		}
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(RenderPass { render_pass: render_pass, device: self.device })
+		} else {
+			Err(res)
+		}
+	}
+}
+
+impl<'a> Drop for RenderPass<'a> {
+	fn drop(&mut self) {
+		assert!(self.device.device != vkraw::VK_NULL_HANDLE);
+		unsafe {
+			println!("vkDestroyRenderPass");
+			vkraw::vkDestroyRenderPass(self.device.device, self.render_pass, ptr::null());
+		}
+	}
+}
+
+pub struct FramebufferBuilder<'a> {
+	pub device: &'a Device<'a>,
+	pub image_view_attachments: Vec<&'a ImageView<'a>>,
+	pub width: usize,
+	pub height: usize,
+	pub layers: usize,
+	pub render_pass: Option<&'a RenderPass<'a>>
+}
+
+impl<'a> FramebufferBuilder<'a> {
+	pub fn new(device: &'a Device<'a>) -> Self {
+		FramebufferBuilder {
+			device: device,
+			image_view_attachments: Vec::<&'a ImageView<'a>>::new(),
+			width: 0,
+			height: 0,
+			layers: 1,
+			render_pass: None
+		}
+	}
+	pub fn set_attachments<'y>(&'y mut self, attachments: Vec<&'a ImageView<'a>>) -> &'y mut Self {
+		self.image_view_attachments = attachments;
+		self
+	}
+	pub fn create(&self) -> Result<Framebuffer<'a>, vkraw::VkResult> {
+		let attachments: Vec<vkraw::VkImageView> = self.image_view_attachments.iter().map(|x| x.image_view).collect();
+		let fb_create_info = vkraw::VkFramebufferCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: 0,
+			renderPass: if self.render_pass.is_some() { self.render_pass.unwrap().render_pass } else { vkraw::VK_NULL_HANDLE },
+			attachmentCount: attachments.len() as u32,
+			pAttachments: attachments.as_ptr(),
+			width: self.width as u32,
+			height: self.height as u32,
+			layers: self.layers as u32
+		};
+		let mut framebuffer: vkraw::VkFramebuffer;
+		let res;
+		println!("vkCreateFramebuffer");
+		unsafe {
+			framebuffer = std::mem::uninitialized();
+			res = vkraw::vkCreateFramebuffer(self.device.device, &fb_create_info, ptr::null(), &mut framebuffer);
+		}
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(Framebuffer { device: &self.device, framebuffer: framebuffer })
+		} else {
+			Err(res)
+		}
+	}
+}
+
+impl<'a> Drop for Framebuffer<'a> {
+	fn drop(&mut self) {
+		assert!(self.device.device != vkraw::VK_NULL_HANDLE);
+		unsafe {
+			println!("vkDestroyFramebuffer");
+			vkraw::vkDestroyFramebuffer(self.device.device, self.framebuffer, ptr::null());
+		}
+	}
+}
+
+impl<'a> Drop for Semaphore<'a> {
+	fn drop(&mut self) {
+		assert!(self.device.device != vkraw::VK_NULL_HANDLE);
+		unsafe {
+			println!("vkDestroySemaphore");
+			vkraw::vkDestroySemaphore(self.device.device, self.semaphore, ptr::null());
+		}
+	}
+}
+
+impl<'a> Drop for Fence<'a> {
+	fn drop(&mut self) {
+		assert!(self.device.device != vkraw::VK_NULL_HANDLE);
+		unsafe {
+			println!("vkDestroyFence");
+			vkraw::vkDestroyFence(self.device.device, self.fence, ptr::null());
+		}
+	}
+}
+
+pub struct DescriptorSetLayoutBuilder<'a> {
+	pub device: &'a Device<'a>,
+	pub bindings: Vec<vkraw::VkDescriptorSetLayoutBinding>
+}
+
+impl<'a> DescriptorSetLayoutBuilder<'a> {
+	pub fn new(device: &'a Device<'a>) -> Self {
+		DescriptorSetLayoutBuilder {
+			device: device,
+			bindings: Vec::<vkraw::VkDescriptorSetLayoutBinding>::new()
+		}
+	}
+	pub fn create(&self) -> Result<DescriptorSetLayout<'a>, vkraw::VkResult> {
+
+		let mut descriptor_set_layout: vkraw::VkDescriptorSetLayout = 0;
+		let dsl_create_info = vkraw::VkDescriptorSetLayoutCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: vkraw::VkDescriptorSetLayoutCreateFlags::_EMPTY,
+			bindingCount: self.bindings.len() as u32,
+			pBindings: self.bindings.as_ptr()
+		};
+		let res;
+		unsafe {
+			res = vkraw::vkCreateDescriptorSetLayout(self.device.device, &dsl_create_info, ptr::null(), &mut descriptor_set_layout);
+		}
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(DescriptorSetLayout { device: self.device, dsl: descriptor_set_layout })
+		} else {
+			Err(res)
+		}
+	}
+}
+
+pub struct PipelineLayoutBuilder<'a> {
+	pub device: &'a Device<'a>,
+	pub dsls: Vec<&'a DescriptorSetLayout<'a>>
+}
+
+impl<'a> PipelineLayoutBuilder<'a> {
+	pub fn new(device: &'a Device<'a>) -> Self {
+		PipelineLayoutBuilder {
+			device: device,
+			dsls: Vec::<&'a DescriptorSetLayout>::new()
+		}
+	}
+	pub fn create(self) -> Result<PipelineLayout<'a>, vkraw::VkResult> {
+
+		let layouts: Vec<vkraw::VkDescriptorSetLayout> = self.dsls.iter().map(|x| x.dsl).collect();
+		let pl_create_info = vkraw::VkPipelineLayoutCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: 0,
+			setLayoutCount: layouts.len() as u32,
+			pSetLayouts: layouts.as_ptr(),
+			pushConstantRangeCount: 0, // TODO 
+			pPushConstantRanges: ptr::null() // TODO 
+		};
+		let mut pipeline_layout: vkraw::VkPipelineLayout = 0;
+		let res;
+		unsafe {
+			res = vkraw::vkCreatePipelineLayout(self.device.device, &pl_create_info, ptr::null(), &mut pipeline_layout);
+		}
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(PipelineLayout { device: self.device, pipeline_layout: pipeline_layout, dsls: self.dsls })
+		} else {
+			Err(res)
+		}
+	}
+}
+
+impl<'a> Drop for DescriptorSetLayout<'a> {
+	fn drop(&mut self) {
+		assert!(self.device.device != vkraw::VK_NULL_HANDLE);
+		unsafe {
+			println!("vkDestroyDescriptorSetLayout");
+			vkraw::vkDestroyDescriptorSetLayout(self.device.device, self.dsl, ptr::null());
+		}
+	}
+}
+
+impl<'a> Drop for PipelineLayout<'a> {
+	fn drop(&mut self) {
+		assert!(self.device.device != vkraw::VK_NULL_HANDLE);
+		unsafe {
+			println!("vkDestroyPipelineLayout");
+			vkraw::vkDestroyPipelineLayout(self.device.device, self.pipeline_layout, ptr::null());
+		}
+	}
+}
+
+pub struct ShaderStage<'a> {
+	pub module: ShaderModule<'a>,
+	pub entry_point: String,
+	pub stage: vkraw::VkShaderStageFlagBits
+}
+
+pub struct PipelineBuilder<'a> {
+	pub device: &'a Device<'a>,
+	pub layout: &'a PipelineLayout<'a>,
+	pub render_pass: &'a RenderPass<'a>,
+	pub shader_stages: Vec<ShaderStage<'a>>,
+	pub vertex_input: Option<vkraw::VkPipelineVertexInputStateCreateInfo>,
+	pub input_assembly: Option<vkraw::VkPipelineInputAssemblyStateCreateInfo>,
+	pub viewport: Option<vkraw::VkPipelineViewportStateCreateInfo>,
+	pub rasterisation: Option<vkraw::VkPipelineRasterizationStateCreateInfo>,
+	pub multisample: Option<vkraw::VkPipelineMultisampleStateCreateInfo>,
+	pub depth_stencil: Option<vkraw::VkPipelineDepthStencilStateCreateInfo>,
+	pub colour_blend: Option<vkraw::VkPipelineColorBlendStateCreateInfo>,
+	pub dynamic: Option<vkraw::VkPipelineDynamicStateCreateInfo>,
+	pub subpass: usize,
+}
+
+impl<'a> PipelineBuilder<'a> {
+	pub fn new(device: &'a Device<'a>, layout: &'a PipelineLayout<'a>, render_pass: &'a RenderPass<'a>) -> Self {
+		PipelineBuilder {
+			device: device,
+			layout: layout,
+			render_pass: render_pass,
+			shader_stages: Vec::<ShaderStage>::new(),
+			vertex_input: None,
+			input_assembly: None,
+			viewport: None,
+			rasterisation: None,
+			multisample: None,
+			depth_stencil: None,
+			colour_blend: None,
+			dynamic: None,
+			subpass: 0
+		}
+	}
+	pub fn create(&self) -> Result<Pipeline<'a>, vkraw::VkResult> {
+
+		let entry_points_cstring: Vec<CString> = self.shader_stages.iter().map(|x| std::ffi::CString::new(x.entry_point.clone()).unwrap()).collect();
+		let modules: Vec<vkraw::VkPipelineShaderStageCreateInfo> = self.shader_stages.iter().enumerate().map(|x| vkraw::VkPipelineShaderStageCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: 0,
+			stage: x.1.stage,
+			module: x.1.module.module,
+			pName: entry_points_cstring[x.0].as_ptr() as *const u8,
+			pSpecializationInfo: ptr::null()
+		}).collect();
+
+		let pipeline_create_info = vkraw::VkGraphicsPipelineCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: vkraw::VkPipelineCreateFlags::_EMPTY,
+			stageCount: modules.len() as u32,
+			pStages: modules.as_ptr(),
+			pVertexInputState: if self.vertex_input.is_some() { &self.vertex_input.unwrap() } else { ptr::null() },
+			pInputAssemblyState: if self.input_assembly.is_some() { &self.input_assembly.unwrap() } else { ptr::null() },
+			pTessellationState: ptr::null(), // TODO
+			pViewportState: if self.viewport.is_some() { &self.viewport.unwrap() } else { ptr::null() },
+			pRasterizationState: if self.rasterisation.is_some() { &self.rasterisation.unwrap() } else { ptr::null() },
+			pMultisampleState: if self.multisample.is_some() { &self.multisample.unwrap() } else { ptr::null() },
+			pDepthStencilState: if self.depth_stencil.is_some() { &self.depth_stencil.unwrap() } else { ptr::null() },
+			pColorBlendState: if self.colour_blend.is_some() { &self.colour_blend.unwrap() } else { ptr::null() },
+			pDynamicState: if self.dynamic.is_some() { &self.dynamic.unwrap() } else { ptr::null() },
+			layout: self.layout.pipeline_layout,
+			renderPass: self.render_pass.render_pass,
+			subpass: self.subpass as u32,
+			basePipelineHandle: vkraw::VK_NULL_HANDLE,
+			basePipelineIndex: 0 as i32
+		};
+		let mut pipeline: vkraw::VkPipeline = 0;
+		let res;
+		unsafe {
+			res = vkraw::vkCreateGraphicsPipelines(self.device.device, vkraw::VK_NULL_HANDLE, 1, &pipeline_create_info, ptr::null(), &mut pipeline);
+		}
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(Pipeline { device: &self.device, pipeline: pipeline })
+		} else {
+			Err(res)
+		}
+	}
+}
+
+impl<'a> Drop for Pipeline<'a> {
+	fn drop(&mut self) {
+		assert!(self.device.device != vkraw::VK_NULL_HANDLE);
+		unsafe {
+			println!("vkDestroyPipeline");
+			vkraw::vkDestroyPipeline(self.device.device, self.pipeline, ptr::null());
+		}
+	}
+}
+
+impl<'a> Drop for ShaderModule<'a> {
+	fn drop(&mut self) {
+		assert!(self.device.device != vkraw::VK_NULL_HANDLE);
+		unsafe {
+			println!("vkDestroyShaderModule");
+			vkraw::vkDestroyShaderModule(self.device.device, self.module, ptr::null());
 		}
 	}
 }
