@@ -14,8 +14,8 @@ fn win32_string(value: &str) -> Vec<u16> {
 
 pub struct Instance {
 	pub instance: vkraw::VkInstance,
-	vk: vkraw::VulkanFunctionPointers,
-	callback: vkraw::VkDebugReportCallbackEXT,
+	pub vk: vkraw::VulkanFunctionPointers,
+	pub callback: vkraw::VkDebugReportCallbackEXT,
 }
 
 pub struct Device<'a> {
@@ -103,6 +103,17 @@ pub struct Pipeline<'a> {
 pub struct ShaderModule<'a> {
 	pub module: vkraw::VkShaderModule,
 	pub device: &'a Device<'a>,
+}
+
+pub struct DescriptorPool<'a> {
+	pub descriptor_pool: vkraw::VkDescriptorPool,
+	pub device: &'a Device<'a>,
+}
+
+pub struct DescriptorSet<'a> {
+	pub descriptor_set: vkraw::VkDescriptorSet,
+	pub descriptor_pool: &'a DescriptorPool<'a>,
+	pub set_layouts: &'a DescriptorSetLayout<'a>
 }
 
 fn debug_message_callback(flags: libc::c_int, otype: libc::c_int, srco: u64, loc: usize, msgcode: u32, layer: *const libc::c_char, msg: *const libc::c_char, _userdata: *mut libc::c_void) -> bool {
@@ -850,6 +861,28 @@ impl<'a> Device<'a> {
 		}
 		if res == vkraw::VkResult::VK_SUCCESS {
 			Ok(ShaderModule { device: &self, module: shader_mod })
+		} else {
+			Err(res)
+		}
+	}
+
+	pub fn create_descriptor_pool(&self, max_sets: usize, pool_sizes: Vec<(usize, vkraw::VkDescriptorType)>) -> Result<DescriptorPool, vkraw::VkResult> {
+		let mut descriptor_pool: vkraw::VkDescriptorPool = 0;
+		let pools: Vec<vkraw::VkDescriptorPoolSize> = pool_sizes.iter().map(|x| vkraw::VkDescriptorPoolSize { _type: x.1, descriptorCount: x.0 as u32 }).collect();
+		let pool_create_info = vkraw::VkDescriptorPoolCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: vkraw::VkDescriptorPoolCreateFlags::_EMPTY,
+			maxSets: max_sets as u32,
+			poolSizeCount: pools.len() as u32,
+			pPoolSizes: pools.as_ptr()
+		};
+		let res;
+		unsafe {
+			res = vkraw::vkCreateDescriptorPool(self.device, &pool_create_info, ptr::null(), &mut descriptor_pool);
+		}
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(DescriptorPool { device: &self, descriptor_pool: descriptor_pool })
 		} else {
 			Err(res)
 		}
@@ -1748,6 +1781,65 @@ impl<'a> Drop for ShaderModule<'a> {
 		unsafe {
 			println!("vkDestroyShaderModule");
 			vkraw::vkDestroyShaderModule(self.device.device, self.module, ptr::null());
+		}
+	}
+}
+
+impl<'a> Drop for DescriptorPool<'a> {
+	fn drop(&mut self) {
+		assert!(self.device.device != vkraw::VK_NULL_HANDLE);
+		unsafe {
+			println!("vkDestroyDescriptorPool");
+			vkraw::vkDestroyDescriptorPool(self.device.device, self.descriptor_pool, ptr::null());
+		}
+	}
+}
+
+impl<'a> DescriptorPool<'a> {
+	pub fn create_descriptor_sets(&self, layouts: Vec<&'a DescriptorSetLayout<'a>>) -> Result<Vec<DescriptorSet>, vkraw::VkResult> {
+		let mut descriptor_sets = Vec::<vkraw::VkDescriptorSet>::with_capacity(layouts.len());
+		let set_layouts: Vec<vkraw::VkDescriptorSetLayout> = layouts.iter().map(|x| x.dsl).collect();
+		let ds_alloc = vkraw::VkDescriptorSetAllocateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+			pNext: ptr::null(),
+			descriptorPool: self.descriptor_pool,
+			descriptorSetCount: set_layouts.len() as u32,
+			pSetLayouts: set_layouts.as_ptr()
+		};
+		let res;
+		unsafe {
+			descriptor_sets.set_len(layouts.len());
+			res = vkraw::vkAllocateDescriptorSets(self.device.device, &ds_alloc, descriptor_sets.as_mut_ptr());
+		}
+		let sets = descriptor_sets.iter().enumerate().map(|(i,x)| DescriptorSet { 
+			descriptor_set: *x,
+			descriptor_pool: &self,
+			set_layouts: layouts[i]
+		}).collect();
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(sets)
+		} else {
+			Err(res)
+		}
+	}
+}
+
+impl<'a> DescriptorSet<'a> {
+	pub fn update_as_buffer(&self, buffer_info: vkraw::VkDescriptorBufferInfo, binding: usize, array_element: usize, dtype: vkraw::VkDescriptorType) {
+		let write_ds = vkraw::VkWriteDescriptorSet {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			pNext: ptr::null(),
+			dstSet: self.descriptor_set,
+			dstBinding: binding as u32,
+			dstArrayElement: array_element as u32,
+			descriptorCount: 1,
+			descriptorType: dtype,
+			pImageInfo: ptr::null(),
+			pBufferInfo: &buffer_info,
+			pTexelBufferView: ptr::null()
+		};
+		unsafe {
+			vkraw::vkUpdateDescriptorSets(self.descriptor_pool.device.device, 1, &write_ds, 0, ptr::null());
 		}
 	}
 }
