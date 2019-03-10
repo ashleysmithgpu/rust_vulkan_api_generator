@@ -1,8 +1,11 @@
 
 fn main() {
 
+	let args: Vec<String> = std::env::args().collect();
+
 	let instance = vk::InstanceBuilder {
 		application_name: "hello triangle".to_string(),
+		args: args,
 		.. Default::default()
 	}.create_instance().expect("Couldn't create instance");
 
@@ -22,11 +25,11 @@ fn main() {
 		physical_device = physical_device2;
 
 		println!("Using device index {:?}, graphics, compute, transfer queue family inices: {}, {}, {}",
-			physical_device_index, db.queue_create_infos[0].0, db.queue_create_infos[1].0, db.queue_create_infos[2].0);
+			physical_device_index, db.queue_create_infos[0].0, db.queue_create_infos[0].0, db.queue_create_infos[0].0);
 
 		graphics_queue = device.get_queue(db.queue_create_infos[0].0, 0);
-		compute_queue = device.get_queue(db.queue_create_infos[1].0, 0);
-		transfer_queue = device.get_queue(db.queue_create_infos[2].0, 0);
+		compute_queue = device.get_queue(db.queue_create_infos[0].0, 0);
+		transfer_queue = device.get_queue(db.queue_create_infos[0].0, 0);
 		heaps = physical_device.memory_properties();
 	}
 
@@ -37,6 +40,24 @@ fn main() {
 	println!("formats {:?}", formats);
 	println!("caps {:?}", caps);
 	println!("modes {:?}", modes);
+
+	let swapchain;
+	{
+		let mut sb = vk::SwapchainBuilder::new(&device, &wsi_info.0);
+		sb.width = 800;
+		sb.height = 600;
+		sb.num_swapchain_images = 2;
+		sb.colour_format = formats[0].format;
+		sb.colour_space = formats[0].colorSpace;
+		sb.present_mode = modes[0];
+		swapchain = sb.create().unwrap();
+	}
+
+	let swapchain_images = swapchain.get_swapchain_images();
+	let swapchain_image_views: Vec<vk::ImageView> = swapchain_images.iter().map(|x| x.create_image_view(formats[0].format).unwrap()).collect();
+
+	let command_pool = device.create_command_pool().unwrap();
+	let cmdbs = command_pool.create_command_buffers(swapchain_images.len()).unwrap();
 
 	let mem = vk::MemoryAllocator::new(&device);
 	let mut vertex_buffer = device.create_buffer(std::mem::size_of::<[f32; 18]>(), vkraw::VkBufferUsageFlags::VK_BUFFER_USAGE_VERTEX_BUFFER_BIT).unwrap();
@@ -56,14 +77,14 @@ fn main() {
 		let mut mapped = index_memory.map::<[u32; 3]>();
 		(*mapped) = [0, 1, 2];
 	}
-	
+
 	#[repr(C)]
 	struct UniformBufferData {
 		projection_from_view: glm::Mat4,
 		view_from_model: glm::Mat4,
 		world_from_model: glm::Mat4
 	};
-	
+
 	let mut uniform_buffers = vec![
 		device.create_buffer(std::mem::size_of::<UniformBufferData>(), vkraw::VkBufferUsageFlags::VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT).unwrap(),
 		device.create_buffer(std::mem::size_of::<UniformBufferData>(), vkraw::VkBufferUsageFlags::VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT).unwrap(),

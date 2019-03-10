@@ -1,4 +1,6 @@
 
+use colored::*;
+
 use std::ptr;
 use std::ffi::CString;
 use std::mem;
@@ -35,9 +37,30 @@ pub struct PhysicalDevice<'a> {
 	pub instance: &'a Instance
 }
 
-pub struct Swapchain<'a, 'b> {
+pub struct Swapchain<'a> {
 	pub swapchain: vkraw::VkSwapchainKHR,
-	pub device: &'a Device<'b>
+	pub device: &'a Device<'a>
+}
+
+pub struct Image<'a> {
+	pub image: vkraw::VkImage,
+	pub device: &'a Device<'a>,
+	swapchain_image: bool
+}
+
+pub struct ImageView<'a> {
+	pub image_view: vkraw::VkImageView,
+	pub image: &'a Image<'a>
+}
+
+pub struct CommandPool<'a> {
+	pub command_pool: vkraw::VkCommandPool,
+	pub device: &'a Device<'a>
+}
+
+pub struct CommandBuffer<'a> {
+	pub command_buffer: vkraw::VkCommandBuffer,
+	pub command_pool: &'a CommandPool<'a>
 }
 
 fn debug_message_callback(flags: libc::c_int, otype: libc::c_int, srco: u64, loc: usize, msgcode: u32, layer: *const libc::c_char, msg: *const libc::c_char, _userdata: *mut libc::c_void) -> bool {
@@ -56,7 +79,7 @@ fn debug_message_callback(flags: libc::c_int, otype: libc::c_int, srco: u64, loc
 
 pub fn rust_debug_message_callback(flags: vkraw::VkDebugReportFlagsEXT, obj_type: vkraw::VkDebugReportObjectTypeEXT, src_obj: u64, location: usize, msg_code: u32, layer: String, message: String) -> bool {
 
-	println!("f:{:?}, ot:{:?}, o:{:?}, loc:{:?}, c:{:?}, l:{:?}:\n {}", flags, obj_type, src_obj, location, msg_code, layer, message);
+	println!("{}:\n {}", format!("f:{:?}, ot:{:?}, o:{:?}, loc:{:?}, c:{:?}, l:{:?}", flags, obj_type, src_obj, location, msg_code, layer).red(), message);
 	true
 }
 
@@ -64,7 +87,8 @@ pub struct InstanceBuilder {
 	pub layers: Vec<String>,
 	pub extensions: Vec<String>,
 	pub application_name: String,
-	pub debug_message_callback: fn(vkraw::VkDebugReportFlagsEXT, vkraw::VkDebugReportObjectTypeEXT, u64, usize, u32, String, String) -> bool
+	pub debug_message_callback: fn(vkraw::VkDebugReportFlagsEXT, vkraw::VkDebugReportObjectTypeEXT, u64, usize, u32, String, String) -> bool,
+	pub args: Vec<String>
 }
 
 impl Default for InstanceBuilder {
@@ -87,12 +111,13 @@ impl Default for InstanceBuilder {
 				"VK_KHR_win32_surface".to_string(),
 				#[cfg(unix)]
 				"VK_KHR_xcb_surface".to_string(),
-				//"VK_KHR_swapchain".to_string());
-				//"VK_KHR_display".to_string());
-				//"VK_KHR_display_swapchain".to_string());
+				//"VK_KHR_swapchain".to_string(),
+				"VK_KHR_display".to_string(),
+				//"VK_KHR_display_swapchain".to_string(),
 			],
 			application_name: "rust vulkan application".to_string(),
-			debug_message_callback: rust_debug_message_callback
+			debug_message_callback: rust_debug_message_callback,
+			args: Vec::<String>::new()
 		}
 	}
 }
@@ -104,45 +129,56 @@ impl InstanceBuilder {
 	pub fn create_instance(&self) -> Result<Instance, vkraw::VkResult> {
 
 		// Check available layers/extensions
+		let available_layers: Vec<String>;
+		let available_extensions: Vec<String>;
+
 		let mut num_available_extensions: u32 = 0;
 		let mut num_available_layers: u32 = 0;
+		let ext_res;
+		let layer_res;
 		unsafe {
-			let res = vkraw::vkEnumerateInstanceExtensionProperties(ptr::null_mut(), &mut num_available_extensions, ptr::null_mut());
-			let res2 = vkraw::vkEnumerateInstanceLayerProperties(&mut num_available_layers, ptr::null_mut());
+			ext_res = vkraw::vkEnumerateInstanceExtensionProperties(ptr::null_mut(), &mut num_available_extensions, ptr::null_mut());
+			layer_res = vkraw::vkEnumerateInstanceLayerProperties(&mut num_available_layers, ptr::null_mut());
 		};
 
-		let available_layers: Vec::<String>;
-		let available_extensions: Vec::<String>;
 		let mut available_layers_struct = Vec::<vkraw::VkLayerProperties>::with_capacity(num_available_layers as usize);
 		let mut available_extensions_struct = Vec::<vkraw::VkExtensionProperties>::with_capacity(num_available_extensions as usize);
 		unsafe {
-			{
+			if ext_res == vkraw::VkResult::VK_SUCCESS {
 				let res = vkraw::vkEnumerateInstanceExtensionProperties(ptr::null_mut(), &mut num_available_extensions, available_extensions_struct.as_mut_ptr());
-				available_extensions_struct.set_len(num_available_extensions as usize);
-				available_extensions = available_extensions_struct.iter().map(|x| std::ffi::CStr::from_ptr(&x.extensionName[0] as *const u8 as *const i8).to_owned().into_string().unwrap()).collect();
+				if res == vkraw::VkResult::VK_SUCCESS {
+					available_extensions_struct.set_len(num_available_extensions as usize);
+				}
 			}
-			{
-				let res2 = vkraw::vkEnumerateInstanceLayerProperties(&mut num_available_layers, available_layers_struct.as_mut_ptr());
-				available_layers_struct.set_len(num_available_layers as usize);
-				available_layers = available_layers_struct.iter().map(|x| std::ffi::CStr::from_ptr(&x.layerName[0] as *const u8 as *const i8).to_owned().into_string().unwrap()).collect();
+			available_extensions = available_extensions_struct.iter().map(|x| std::ffi::CStr::from_ptr(&x.extensionName[0] as *const u8 as *const i8).to_owned().into_string().unwrap()).collect();
+			if layer_res == vkraw::VkResult::VK_SUCCESS {
+				let res = vkraw::vkEnumerateInstanceLayerProperties(&mut num_available_layers, available_layers_struct.as_mut_ptr());
+				if res == vkraw::VkResult::VK_SUCCESS {
+					available_layers_struct.set_len(num_available_layers as usize);
+				}
 			}
+			available_layers = available_layers_struct.iter().map(|x| std::ffi::CStr::from_ptr(&x.layerName[0] as *const u8 as *const i8).to_owned().into_string().unwrap()).collect();
 		};
-
-		println!("layers: {} {:?}", available_layers.len(), available_layers);
-		println!("extensions: {} {:?}", available_extensions.len(), available_extensions);
 
 		let res: vkraw::VkResult;
 		let mut instance: vkraw::VkInstance = 0;
 
 		// Create copy of each of the strings as a null terminated string for C
+		// warn about unavailable layers
 		let mut enabled_layers_rust = Vec::<CString>::with_capacity(self.layers.len());
 		for l in &self.layers {
 			enabled_layers_rust.push(CString::new(l.clone()).unwrap());
+			if !available_layers.iter().any(|x| x == l) {
+				println!("{}", format!("Layer {} not available", l).red());
+			}
 		}
 
 		let mut enabled_extensions_rust = Vec::<CString>::with_capacity(self.extensions.len());
 		for e in &self.extensions {
 			enabled_extensions_rust.push(CString::new(e.clone()).unwrap());
+			if !available_extensions.iter().any(|x| x == e) {
+				println!("{}", format!("Extension {} not available", e).red());
+			}
 		}
 
 		// Create a vector of pointers to the above
@@ -495,6 +531,7 @@ impl<'a> DeviceBuilder<'a> {
 				"VK_LAYER_LUNARG_standard_validation".to_string(),
 			],
 			extensions: vec![
+				"VK_KHR_swapchain".to_string(),
 			],
 			queue_create_infos: vec![(0, vec![1.0])],
 			physical_device: None
@@ -563,6 +600,7 @@ impl<'a> DeviceBuilder<'a> {
 		self.queue_create_infos = vec![(graphics_queue_family_index.first().unwrap().clone() as u32, vec![1.0]),
 			(compute_queue_family_index.last().unwrap().clone() as u32, vec![1.0]),
 			(transfer_queue_family_index.last().unwrap().clone() as u32, vec![1.0])];
+		self.queue_create_infos.dedup();
 
 		self
 	}
@@ -678,6 +716,27 @@ impl<'a> Device<'a> {
 			Err(res)
 		}
 	}
+
+	pub fn create_command_pool(&self) -> Result<CommandPool, vkraw::VkResult> {
+		// Create command pool
+		println!("Creating command pool");
+		let mut command_pool: vkraw::VkCommandPool = 0;
+		let pool_create_info = vkraw::VkCommandPoolCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: vkraw::VkCommandPoolCreateFlags::VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+			queueFamilyIndex: 0
+		};
+		let res;
+		unsafe {
+			res = vkraw::vkCreateCommandPool(self.device, &pool_create_info, ptr::null(), &mut command_pool);
+		}
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(CommandPool { device: &self, command_pool: command_pool })
+		} else {
+			Err(res)
+		}
+	}
 }
 
 impl<'a> Drop for Surface<'a> {
@@ -699,17 +758,157 @@ impl<'a> Drop for Buffer<'a> {
 }
 
 pub struct SwapchainBuilder<'a> {
-	device: &'a Device<'a>
+	pub device: &'a Device<'a>,
+	pub surface: &'a Surface<'a>,
+	pub height: u32,
+	pub width: u32,
+	pub num_swapchain_images: u32,
+	pub colour_format: vkraw::VkFormat,
+	pub colour_space: vkraw::VkColorSpaceKHR,
+	pub swapchain_transform: vkraw::VkSurfaceTransformFlagsKHR,
+	pub composite_alpha: vkraw::VkCompositeAlphaFlagBitsKHR,
+	pub present_mode: vkraw::VkPresentModeKHR
 }
 
 impl<'a> SwapchainBuilder<'a> {
-	pub fn new(device: &'a Device) -> SwapchainBuilder<'a> {
+	pub fn new(device: &'a Device, surface: &'a Surface) -> SwapchainBuilder<'a> {
 		SwapchainBuilder {
-			device: &device
+			device: &device,
+			surface: &surface,
+			height: 0,
+			width: 0,
+			num_swapchain_images: 0,
+			colour_format: vkraw::VkFormat::VK_FORMAT_B8G8R8A8_UNORM,
+			colour_space: vkraw::VkColorSpaceKHR::VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
+			swapchain_transform: vkraw::VkSurfaceTransformFlagsKHR::VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+			composite_alpha: vkraw::VkCompositeAlphaFlagBitsKHR::VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+			present_mode: vkraw::VkPresentModeKHR::VK_PRESENT_MODE_FIFO_KHR
 		}
 	}
-	pub fn create(&self) -> Result<Swapchain, vkraw::VkResult> {
-		Ok(Swapchain { device: &self.device, swapchain: 0 })
+	pub fn create(&self) -> Result<Swapchain<'a>, vkraw::VkResult> {
+
+		let swapchain_create_info = vkraw::VkSwapchainCreateInfoKHR {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+			pNext: ptr::null(),
+			flags: vkraw::VkSwapchainCreateFlagBitsKHR::_EMPTY,
+			surface: self.surface.surface,
+			minImageCount: self.num_swapchain_images,
+			imageFormat: self.colour_format,
+			imageColorSpace: self.colour_space,
+			imageExtent: vkraw::VkExtent2D{ width: self.width, height: self.height },
+			imageArrayLayers: 1,
+			imageUsage: vkraw::VkImageUsageFlags::VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+			imageSharingMode: vkraw::VkSharingMode::VK_SHARING_MODE_EXCLUSIVE,
+			queueFamilyIndexCount: 0,
+			pQueueFamilyIndices: ptr::null(),
+			preTransform: self.swapchain_transform,
+			compositeAlpha: self.composite_alpha,
+			presentMode: self.present_mode,
+			clipped: vkraw::VK_TRUE,
+			oldSwapchain: vkraw::VK_NULL_HANDLE
+		};
+
+		let mut swapchain: vkraw::VkSwapchainKHR = 0;
+		let res;
+		{
+			assert!(self.device.instance.vk.CreateSwapchainKHR.is_some());
+			res = self.device.instance.vk.CreateSwapchainKHR.unwrap()(self.device.device, &swapchain_create_info, ptr::null(), &mut swapchain);
+		}
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(Swapchain { device: &self.device, swapchain: swapchain })
+		} else {
+			Err(res)
+		}
+	}
+}
+
+impl<'a> Swapchain<'a> {
+	pub fn get_swapchain_images(&self) -> Vec<Image<'a>> {
+
+		let mut swapchain_image_count = 0;
+		assert!(self.device.instance.vk.GetSwapchainImagesKHR.is_some());
+		self.device.instance.vk.GetSwapchainImagesKHR.unwrap()(self.device.device, self.swapchain, &mut swapchain_image_count, ptr::null_mut());
+		assert!(swapchain_image_count > 0);
+		println!("Creating {} swapchain images", swapchain_image_count);
+		let mut swapchain_images = Vec::<vkraw::VkImage>::with_capacity(swapchain_image_count as usize);
+		unsafe {
+			swapchain_images.set_len(swapchain_image_count as usize);
+		}
+		assert!(self.device.instance.vk.GetSwapchainImagesKHR.is_some());
+		self.device.instance.vk.GetSwapchainImagesKHR.unwrap()(self.device.device, self.swapchain, &mut swapchain_image_count, swapchain_images.as_mut_ptr());
+
+		swapchain_images.iter().map(|x| Image { device: &self.device, image: *x, swapchain_image: true }).collect()
+	}
+}
+
+impl<'a> Image<'a> {
+	pub fn create_image_view(&self, colour_format: vkraw::VkFormat) -> Result<ImageView, vkraw::VkResult> {
+
+		let mut image_view: vkraw::VkImageView;
+		let img_create_info = vkraw::VkImageViewCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: 0,
+			image: self.image,
+			viewType: vkraw::VkImageViewType::VK_IMAGE_VIEW_TYPE_2D,
+			format: colour_format,
+			components: vkraw::VkComponentMapping {
+				r: vkraw::VkComponentSwizzle::VK_COMPONENT_SWIZZLE_R,
+				g: vkraw::VkComponentSwizzle::VK_COMPONENT_SWIZZLE_G,
+				b: vkraw::VkComponentSwizzle::VK_COMPONENT_SWIZZLE_B,
+				a: vkraw::VkComponentSwizzle::VK_COMPONENT_SWIZZLE_A
+			},
+			subresourceRange: vkraw::VkImageSubresourceRange {
+				aspectMask: vkraw::VkImageAspectFlags::VK_IMAGE_ASPECT_COLOR_BIT,
+				baseMipLevel: 0,
+				levelCount: 1,
+				baseArrayLayer: 0,
+				layerCount: 1
+			}
+		};
+		let res;
+		unsafe{
+			image_view = std::mem::uninitialized();
+			res = vkraw::vkCreateImageView(self.device.device, &img_create_info, ptr::null(), &mut image_view);
+		}
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(ImageView { image: &self, image_view: image_view })
+		} else {
+			Err(res)
+		}
+	}
+}
+
+impl<'a> Drop for Swapchain<'a> {
+	fn drop(&mut self) {
+		unsafe { vkraw::vkDeviceWaitIdle(self.device.device); }
+		assert!(self.device.device != vkraw::VK_NULL_HANDLE);
+		println!("DestroySwapchainKHR");
+		self.device.instance.vk.DestroySwapchainKHR.unwrap()(self.device.device, self.swapchain, ptr::null());
+	}
+}
+
+impl<'a> Drop for Image<'a> {
+	fn drop(&mut self) {
+
+		// Don't destroy images from swapchains
+		if !self.swapchain_image {
+			assert!(self.device.device != vkraw::VK_NULL_HANDLE);
+			println!("vkDestroyImage");
+			unsafe {
+				vkraw::vkDestroyImage(self.device.device, self.image, ptr::null());
+			}
+		}
+	}
+}
+
+impl<'a> Drop for ImageView<'a> {
+	fn drop(&mut self) {
+		assert!(self.image.device.device != vkraw::VK_NULL_HANDLE);
+		println!("vkDestroyImageView");
+		unsafe {
+			vkraw::vkDestroyImageView(self.image.device.device, self.image_view, ptr::null());
+		}
 	}
 }
 
@@ -862,3 +1061,47 @@ impl<'a, T> Drop for MappedMem<'a, T> {
 	}
 }
 
+impl<'a> CommandPool<'a> {
+	pub fn create_command_buffers(&self, num: usize) -> Result<Vec<CommandBuffer>, vkraw::VkResult> {
+		// Create command buffers
+		println!("Creating command buffers");
+		let mut command_buffers = Vec::<vkraw::VkCommandBuffer>::with_capacity(num);
+		let cmd_buf_create_info = vkraw::VkCommandBufferAllocateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+			pNext: ptr::null(),
+			commandPool: self.command_pool,
+			level: vkraw::VkCommandBufferLevel::VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+			commandBufferCount: num as u32
+		};
+		let res;
+		unsafe {
+			command_buffers.set_len(num);
+			res = vkraw::vkAllocateCommandBuffers(self.device.device, &cmd_buf_create_info, command_buffers.as_mut_ptr());
+		}
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(command_buffers.iter().map(|x| CommandBuffer{ command_pool: &self, command_buffer: *x }).collect())
+		} else {
+			Err(res)
+		}
+	}
+}
+
+impl<'a> Drop for CommandPool<'a> {
+	fn drop(&mut self) {
+		assert!(self.device.device != vkraw::VK_NULL_HANDLE);
+		println!("vkDestroyCommandPool");
+		unsafe {
+			vkraw::vkDestroyCommandPool(self.device.device, self.command_pool, ptr::null());
+		}
+	}
+}
+
+impl<'a> Drop for CommandBuffer<'a> {
+	fn drop(&mut self) {
+		assert!(self.command_pool.device.device != vkraw::VK_NULL_HANDLE);
+		println!("vkFreeCommandBuffers");
+		unsafe {
+			vkraw::vkFreeCommandBuffers(self.command_pool.device.device, self.command_pool.command_pool, 1, &self.command_buffer);
+		}
+	}
+}

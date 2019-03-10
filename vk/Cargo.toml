@@ -9,6 +9,7 @@ edition = "2018"
 
 [dependencies]
 libc = "0.2.24"
+colored = "1.7.0"
 
 [target."cfg(windows)".dependencies]
 vkraw = { path = "../vkraw", version = "0.0.1", features = ["VK_KHR_win32_surface"] }
