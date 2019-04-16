@@ -369,7 +369,7 @@ fn main() {
 					b"enum" => {
 
 
-if require_feature == "" {
+if require_feature != "VK_VERSION_1_1" {
 
 
 						if matching_what[0] == "enums" {
@@ -386,7 +386,17 @@ if require_feature == "" {
 										bitflags.last_mut().unwrap().values.push((name, BitflagsValueType::Value(value)));
 									}
 								} else {
-									enums.last_mut().unwrap().values.push((name, value.parse::<i32>().unwrap()));
+								println!("{}", reader.buffer_position());
+									// TODO: Some enums have no value VK_COLORSPACE_SRGB_NONLINEAR_KHR
+									if !attributes.get("alias").is_some() {
+										if value.find('x').is_some() {
+											let without_prefix = value.trim_start_matches("0x");
+											let z = i32::from_str_radix(without_prefix, 16);
+											enums.last_mut().unwrap().values.push((name, z.unwrap()));
+										} else {
+											enums.last_mut().unwrap().values.push((name, value.parse::<i32>().unwrap()));
+										}
+									}
 								}
 							}
 						} else if matching_what[0] == "require" && matching_what[1] == "feature" {
@@ -428,7 +438,7 @@ if require_feature == "" {
 
 
 
-if require_feature == "" {
+if require_feature != "VK_VERSION_1_1" {
 
 
 
@@ -459,7 +469,7 @@ if require_feature == "" {
 					b"command" => {
 
 
-if require_feature == "" {
+if require_feature != "VK_VERSION_1_1" {
 
 
 

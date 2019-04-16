@@ -4,6 +4,9 @@ use std::path::Path;
 
 fn main() {
 
+	// Only run if files have changed
+	println!("cargo:rerun-if-changed=build.rs");
+
 	// Build the generator
 	Command::new("cargo").current_dir("../vkgen").args(&["build"]).status().unwrap();
 

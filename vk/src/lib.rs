@@ -6,6 +6,8 @@ use std::ffi::CString;
 use std::mem;
 use std::io::prelude::*;
 
+use rspirv::binary::Disassemble;
+
 #[cfg(windows)]
 fn win32_string(value: &str) -> Vec<u16> {
 	use std::os::windows::ffi::OsStrExt;
@@ -116,6 +118,13 @@ pub struct DescriptorSet<'a> {
 	pub set_layouts: &'a DescriptorSetLayout<'a>
 }
 
+pub enum ClearValue {
+	Colourf32([f32; 4]),
+	Colouri32([i32; 4]),
+	Colouru32([u32; 4]),
+	DepthStencil{ depth: f32, stencil: u32 }
+}
+
 fn debug_message_callback(flags: libc::c_int, otype: libc::c_int, srco: u64, loc: usize, msgcode: u32, layer: *const libc::c_char, msg: *const libc::c_char, _userdata: *mut libc::c_void) -> bool {
 
 	let c_s = unsafe { std::ffi::CStr::from_ptr(msg) };
@@ -164,8 +173,15 @@ impl Default for InstanceBuilder {
 				"VK_KHR_win32_surface".to_string(),
 				#[cfg(unix)]
 				"VK_KHR_xcb_surface".to_string(),
+				"VK_KHR_get_surface_capabilities2".to_string(),
+
+				"VK_EXT_swapchain_colorspace".to_string(),
+
+				"VK_KHR_get_physical_device_properties2".to_string(),
 				//"VK_KHR_swapchain".to_string(),
-				"VK_KHR_display".to_string(),
+				//"VK_EXT_full_screen_exclusive".to_string(),
+				
+				//"VK_KHR_display".to_string(),
 				//"VK_KHR_display_swapchain".to_string(),
 			],
 			application_name: "rust vulkan application".to_string(),
@@ -453,12 +469,32 @@ impl Instance {
 			winapi::um::winuser::ShowWindow(handle, winapi::um::winuser::SW_SHOW);
 			winapi::um::winuser::SetForegroundWindow(handle);
 			winapi::um::winuser::SetFocus(handle);
+			
+			// Set fullscreen
+			if true {
+				let style = /*winapi::shared::basetsd::LONG_PTR:*/ winapi::um::winuser::GetWindowLongPtrA(handle, winapi::um::winuser::GWL_STYLE);
+				let exstyle = /*winapi::shared::basetsd::LONG_PTR:*/ winapi::um::winuser::GetWindowLongPtrA(handle, winapi::um::winuser::GWL_EXSTYLE);
+				
+				winapi::um::winuser::SetWindowLongPtrA(handle, winapi::um::winuser::GWL_STYLE, style & (!(winapi::um::winuser::WS_CAPTION | winapi::um::winuser::WS_THICKFRAME) as isize));
+				winapi::um::winuser::SetWindowLongPtrA(handle, winapi::um::winuser::GWL_EXSTYLE, exstyle & (!(winapi::um::winuser::WS_EX_DLGMODALFRAME | winapi::um::winuser::WS_EX_WINDOWEDGE | winapi::um::winuser::WS_EX_CLIENTEDGE | winapi::um::winuser::WS_EX_STATICEDGE) as isize));
+				
+				let mut monitor_info: winapi::um::winuser::MONITORINFO;
+				unsafe {
+					monitor_info = std::mem::uninitialized();
+				}
+				monitor_info.cbSize = std::mem::size_of::<winapi::um::winuser::MONITORINFO>() as u32;
+				winapi::um::winuser::GetMonitorInfoA(winapi::um::winuser::MonitorFromWindow(handle, winapi::um::winuser::MONITOR_DEFAULTTONEAREST), &mut monitor_info);
+				winapi::um::winuser::SetWindowPos(handle, ptr::null_mut(), monitor_info.rcMonitor.left, monitor_info.rcMonitor.top, 
+					monitor_info.rcMonitor.right - monitor_info.rcMonitor.left,
+					monitor_info.rcMonitor.bottom - monitor_info.rcMonitor.top,
+					winapi::um::winuser::SWP_NOZORDER | winapi::um::winuser::SWP_NOACTIVATE | winapi::um::winuser::SWP_FRAMECHANGED);
+					}
 
-			assert!(self.vk.CreateWin32SurfaceKHR.is_some());
-			println!("vk.CreateWin32SurfaceKHR");
-			let res = self.vk.CreateWin32SurfaceKHR.unwrap()(self.instance, &surface_create_info, ptr::null(), &mut surface);
-			assert!(res == vkraw::VkResult::VK_SUCCESS);
-		}
+				assert!(self.vk.CreateWin32SurfaceKHR.is_some());
+				println!("vk.CreateWin32SurfaceKHR");
+				let res = self.vk.CreateWin32SurfaceKHR.unwrap()(self.instance, &surface_create_info, ptr::null(), &mut surface);
+				assert!(res == vkraw::VkResult::VK_SUCCESS);
+			}
 
 		(Surface { surface: surface, instance: self }, handle, hinstance)
 	}
@@ -530,6 +566,69 @@ impl<'a> PhysicalDevice<'a> {
 		}
 	}
 
+	pub fn supported_surface_formats2(&self, hdr: bool, wsi_info: &(Surface, winapi::shared::windef::HWND, winapi::shared::minwindef::HINSTANCE)) -> Result<Vec<vkraw::VkSurfaceFormat2KHR>, vkraw::VkResult> {
+
+		let fullscreen_info = vkraw::VkSurfaceFullScreenExclusiveInfoEXT {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_SURFACE_FULL_SCREEN_EXCLUSIVE_INFO_EXT,
+			pNext: ptr::null_mut(),
+			fullScreenExclusive: vkraw::VkFullScreenExclusiveEXT::VK_FULL_SCREEN_EXCLUSIVE_APPLICATION_CONTROLLED_EXT
+		};
+		let win32_fullscreen_info = vkraw::VkSurfaceFullScreenExclusiveWin32InfoEXT {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_SURFACE_FULL_SCREEN_EXCLUSIVE_WIN32_INFO_EXT,
+			pNext: unsafe { mem::transmute(&fullscreen_info) },
+			hmonitor: unsafe { winapi::um::winuser::MonitorFromWindow(wsi_info.1, winapi::um::winuser::MONITOR_DEFAULTTOPRIMARY) as u64 }
+		};
+
+		let surface_info = vkraw::VkPhysicalDeviceSurfaceInfo2KHR {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SURFACE_INFO_2_KHR,
+			pNext: if hdr { unsafe { mem::transmute(&win32_fullscreen_info) } } else { ptr::null_mut() },
+			surface: wsi_info.0.surface
+		};
+	
+		// Get a supported colour format and colour space
+		let mut format_count = 0;
+		assert!(self.instance.vk.GetPhysicalDeviceSurfaceFormats2KHR.is_some());
+		self.instance.vk.GetPhysicalDeviceSurfaceFormats2KHR.unwrap()(self.physical_device, &surface_info, &mut format_count, ptr::null_mut());
+
+		assert!(format_count > 0);
+		/*let mut surface_formats = Vec::<vkraw::VkSurfaceFormat2KHR>::with_capacity(format_count as usize);
+		unsafe {
+			surface_formats.set_len(format_count as usize);
+		}*/
+				
+		//println!("num formats {}", format_count);
+		let mut surface_formats = vec![vkraw::VkSurfaceFormat2KHR { sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR, pNext: ptr::null_mut(), surfaceFormat: vkraw::VkSurfaceFormatKHR { format: vkraw::VkFormat::VK_FORMAT_UNDEFINED, colorSpace: vkraw::VkColorSpaceKHR::VK_COLOR_SPACE_SRGB_NONLINEAR_KHR }, }; format_count as usize];
+
+		println!("num formats {}", format_count);
+	//println!("asdf 1 {:?}", surface_formats[17]);
+		assert!(self.instance.vk.GetPhysicalDeviceSurfaceFormats2KHR.is_some());
+		let res = self.instance.vk.GetPhysicalDeviceSurfaceFormats2KHR.unwrap()(self.physical_device, &surface_info, &mut format_count, surface_formats.as_mut_ptr());
+
+		println!("num formats {}", format_count);
+	
+	/*for x in 0..surface_formats.len() {
+	unsafe {
+	let view = &surface_formats[x] as *const _ as *const u8;
+    for i in 0 .. mem::size_of::<vkraw::VkSurfaceFormat2KHR>() {
+        print!("{:02x} ", unsafe {*view.offset(i as isize)});
+    }
+	};
+	print!("\n");*/
+	
+	//println!("asdf 2 {:?}", surface_formats[x].sType);
+	//println!("asdf 2 {:?}", surface_formats[x].pNext);
+	//println!("asdf 2 {:?}", surface_formats[x].surfaceFormat.format);
+	//println!("asdf 2 {:?}", surface_formats[x].surfaceFormat.colorSpace);
+	//}
+	
+	
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(surface_formats)
+		} else {
+			Err(res)
+		}
+	}
+
 	pub fn surface_capabilities(&self, surface: &Surface) -> Result<vkraw::VkSurfaceCapabilitiesKHR, vkraw::VkResult> {
 		let mut surface_capabilities: vkraw::VkSurfaceCapabilitiesKHR;
 		unsafe {
@@ -572,6 +671,7 @@ pub struct DeviceBuilder<'a> {
 	pub layers: Vec<String>,
 	pub extensions: Vec<String>,
 	pub queue_create_infos: Vec<(u32, Vec<f32>)>,
+	pub want_device_name: String,
 	pub physical_device: Option<(PhysicalDevice<'a>, usize)> // Physical device and index
 }
 
@@ -585,10 +685,17 @@ impl<'a> DeviceBuilder<'a> {
 			],
 			extensions: vec![
 				"VK_KHR_swapchain".to_string(),
+				"VK_EXT_full_screen_exclusive".to_string(),
+				"VK_AMD_display_native_hdr".to_string(),
 			],
 			queue_create_infos: vec![(0, vec![1.0])],
+			want_device_name: String::new(),
 			physical_device: None
 		}
+	}
+	pub fn use_device_named<'y>(&'y mut self, name: String) -> &'y mut Self {
+		self.want_device_name = name;
+		self
 	}
 	pub fn default_queues_physical_device<'y>(&'y mut self, surface: &Surface) -> &'y mut Self {
 
@@ -603,6 +710,15 @@ impl<'a> DeviceBuilder<'a> {
 			|(device_index, device)|
 			{
 				let qf = device.queue_families();
+				
+				let s;
+				unsafe {
+					s = std::ffi::CStr::from_ptr(device.physical_properties().deviceName.as_ptr() as *const i8).to_str().unwrap().to_string();
+					println!("Name: {}", s);
+				}
+				if s.contains("GeForce") {
+					return None
+				}
 
 				let mut queue_supports_present = vkraw::VK_FALSE;
 
@@ -636,7 +752,8 @@ impl<'a> DeviceBuilder<'a> {
 				).collect();
 
 				// Return the first physical device that has at least one of each queue family
-				if graphics_queue_family_index.len() > 0 && compute_queue_family_index.len() > 0 && transfer_queue_family_index.len() > 0 {
+				if graphics_queue_family_index.len() > 0 && compute_queue_family_index.len() > 0 && transfer_queue_family_index.len() > 0 &&
+					(self.want_device_name.is_empty() || s.contains(&self.want_device_name)){
 					Some((PhysicalDevice { physical_device: device.physical_device, instance: &self.instance }, device_index))
 				} else {
 					None
@@ -831,7 +948,7 @@ impl<'a> Device<'a> {
 
 	pub fn load_spirv_shader_from_disk(&self, filename: &str) -> Result<ShaderModule, vkraw::VkResult> {
 
-		let mut buffer = Vec::new();
+		let mut buffer = Vec::<u8>::new();
 
 		// Load file contents in to buffer
 		if let Ok(mut f) = std::fs::File::open(filename) {
@@ -844,6 +961,21 @@ impl<'a> Device<'a> {
 			println!("Could not load file {}", filename);
 			return Err(vkraw::VkResult::VK_RESULT_MAX_ENUM)
 		}
+		
+		/*let dis = match rspirv::mr::load_bytes(buffer.clone()) {
+			Ok(m) => m.disassemble(),
+			Err(err) => format!("{}", err),
+		};
+		print!("{}: {}", filename, dis);*/
+		
+		/*println!("a {}", buffer.len());
+		unsafe {
+		let view = &buffer as *const _ as *const u8;
+		for i in 0 .. buffer.len() {
+			print!("{:02x} ", unsafe {*view.offset(i as isize)});
+		}
+		}
+		print!("\n");*/
 
 		let mut shader_mod: vkraw::VkShaderModule = 0;
 
@@ -853,6 +985,44 @@ impl<'a> Device<'a> {
 			flags: 0,
 			codeSize: buffer.len() as u64,
 			pCode: buffer.as_mut_ptr() as *mut u32
+		};
+
+		let res;
+		unsafe {
+			res = vkraw::vkCreateShaderModule(self.device, &mod_create_info, ptr::null(), &mut shader_mod);
+		}
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(ShaderModule { device: &self, module: shader_mod })
+		} else {
+			Err(res)
+		}
+	}
+
+	pub fn load_spirv_shader_from_buffer(&self, buffer: &Vec<u32>) -> Result<ShaderModule, vkraw::VkResult> {
+
+		let mut shader_mod: vkraw::VkShaderModule = 0;
+		
+		/*println!("a {}", buffer.len() * 4);
+		unsafe {
+		let view = &buffer as *const _ as *const u8;
+		for i in 0 .. buffer.len() * 4 {
+			print!("{:02x} ", unsafe {*view.offset(i as isize)});
+		}
+		}
+		print!("\n");*/
+
+		/*let dis = match rspirv::mr::load_words(buffer.clone()) {
+			Ok(m) => m.disassemble(),
+			Err(err) => format!("{}", err),
+		};
+		print!("buf: {}", dis);*/
+
+		let mod_create_info = vkraw::VkShaderModuleCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: 0,
+			codeSize: (buffer.len() * 4) as u64,
+			pCode: buffer.as_ptr() as *const u32
 		};
 
 		let res;
@@ -965,7 +1135,6 @@ impl<'a> Drop for Buffer<'a> {
 		}
 	}
 }
-
 pub struct SwapchainBuilder<'a> {
 	pub device: &'a Device<'a>,
 	pub surface: &'a Surface<'a>,
@@ -994,7 +1163,7 @@ impl<'a> SwapchainBuilder<'a> {
 			present_mode: vkraw::VkPresentModeKHR::VK_PRESENT_MODE_FIFO_KHR
 		}
 	}
-	pub fn create(&self) -> Result<Swapchain<'a>, vkraw::VkResult> {
+	pub fn create(&self, old_swapchain: &Option<Swapchain>) -> Result<Swapchain<'a>, vkraw::VkResult> {
 
 		let swapchain_create_info = vkraw::VkSwapchainCreateInfoKHR {
 			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
@@ -1014,7 +1183,7 @@ impl<'a> SwapchainBuilder<'a> {
 			compositeAlpha: self.composite_alpha,
 			presentMode: self.present_mode,
 			clipped: vkraw::VK_TRUE,
-			oldSwapchain: vkraw::VK_NULL_HANDLE
+			oldSwapchain: if old_swapchain.is_some() { old_swapchain.as_ref().unwrap().swapchain } else { vkraw::VK_NULL_HANDLE }
 		};
 
 		let mut swapchain: vkraw::VkSwapchainKHR = 0;
@@ -1091,7 +1260,7 @@ impl<'a> ImageViewBuilder<'a> {
 		let img_create_info = vkraw::VkImageViewCreateInfo {
 			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
 			pNext: ptr::null(),
-			flags: 0,
+			flags: vkraw::VkImageViewCreateFlagBits::_EMPTY,
 			image: self.image.image,
 			viewType: self.view_type,
 			format: self.format,
@@ -1283,13 +1452,13 @@ impl<'a> Mem<'a> {
 			assert!(data != ptr::null_mut());
 		}
 		self.ptr = data as u64;
-		println!("Mem::map()");
+		//println!("Mem::map()");
 		MappedMem { mem: self, ptr: &self.ptr, _phantom: std::marker::PhantomData }
 	}
 }
 impl<'a> Drop for Mem<'a> {
 	fn drop(&mut self) {
-		println!("Mem::drop()");
+		//println!("Mem::drop()");
 		unsafe {
 			vkraw::vkFreeMemory(self.memory_allocator.device.device, self.mem, ptr::null());
 		}
@@ -1315,14 +1484,13 @@ impl<'a, T> std::ops::DerefMut for MappedMem<'a, T> {
 }
 impl<'a, T> MappedMem<'a, T> {
 	pub fn get_ptr(&mut self) -> *mut T {
-		println!("MappedMem::get_ptr()");
+		//println!("MappedMem::get_ptr()");
 		unsafe { std::mem::transmute::<u64, *mut T>(*self.ptr) }
 	}
 }
 impl<'a, T> Drop for MappedMem<'a, T> {
 	fn drop(&mut self) {
-		println!("MappedMem::drop()");
-
+		//println!("MappedMem::drop()");
 		unsafe {
 			vkraw::vkUnmapMemory(self.mem.memory_allocator.device.device, self.mem.mem);
 		}
@@ -1442,26 +1610,6 @@ impl<'a> RenderPassBuilder<'a> {
 				pDepthStencilAttachment: &self.attachment_references[1],
 				preserveAttachmentCount: 0,
 				pPreserveAttachments: ptr::null()
-			}
-		];
-		self.dependencies = vec![
-			vkraw::VkSubpassDependency {
-				srcSubpass: vkraw::VK_SUBPASS_EXTERNAL as u32,
-				dstSubpass: 0,
-				srcStageMask: vkraw::VkPipelineStageFlags::VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-				dstStageMask: vkraw::VkPipelineStageFlags::VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-				srcAccessMask: vkraw::VkAccessFlags::VK_ACCESS_MEMORY_READ_BIT,
-				dstAccessMask: vkraw::VkAccessFlags::VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | vkraw::VkAccessFlags::VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-				dependencyFlags: vkraw::VkDependencyFlags::VK_DEPENDENCY_BY_REGION_BIT,
-			},
-			vkraw::VkSubpassDependency {
-				srcSubpass: 0,
-				dstSubpass: vkraw::VK_SUBPASS_EXTERNAL as u32,
-				srcStageMask: vkraw::VkPipelineStageFlags::VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-				dstStageMask: vkraw::VkPipelineStageFlags::VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-				srcAccessMask: vkraw::VkAccessFlags::VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | vkraw::VkAccessFlags::VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-				dstAccessMask: vkraw::VkAccessFlags::VK_ACCESS_MEMORY_READ_BIT,
-				dependencyFlags: vkraw::VkDependencyFlags::VK_DEPENDENCY_BY_REGION_BIT,
 			}
 		];
 
@@ -1698,6 +1846,12 @@ pub struct PipelineBuilder<'a> {
 	pub colour_blend: Option<vkraw::VkPipelineColorBlendStateCreateInfo>,
 	pub dynamic: Option<vkraw::VkPipelineDynamicStateCreateInfo>,
 	pub subpass: usize,
+	
+	vertex_attributes: Vec<vkraw::VkVertexInputAttributeDescription>,
+	vertex_bindings: Vec<vkraw::VkVertexInputBindingDescription>,
+	scissors: Vec<vkraw::VkRect2D>,
+	viewports: Vec<vkraw::VkViewport>,
+	blend_attachments: Vec<vkraw::VkPipelineColorBlendAttachmentState>
 }
 
 impl<'a> PipelineBuilder<'a> {
@@ -1715,8 +1869,181 @@ impl<'a> PipelineBuilder<'a> {
 			depth_stencil: None,
 			colour_blend: None,
 			dynamic: None,
-			subpass: 0
+			subpass: 0,
+			vertex_attributes: Vec::<vkraw::VkVertexInputAttributeDescription>::new(),
+			vertex_bindings: Vec::<vkraw::VkVertexInputBindingDescription>::new(),
+			scissors: Vec::<vkraw::VkRect2D>::new(),
+			viewports: Vec::<vkraw::VkViewport>::new(),
+			blend_attachments: Vec::<vkraw::VkPipelineColorBlendAttachmentState>::new()
 		}
+	}
+	pub fn default_graphics<'y>(&'y mut self, vertex_shader: ShaderModule<'a>, fragment_shader: ShaderModule<'a>, width: u32, height: u32) -> &'y mut Self {
+		let vertex_size = std::mem::size_of::<f32>() * 6;
+		self.vertex_bindings = vec![vkraw::VkVertexInputBindingDescription {
+			binding: 0,
+			stride: vertex_size as u32,
+			inputRate: vkraw::VkVertexInputRate::VK_VERTEX_INPUT_RATE_VERTEX
+		}];
+		self.vertex_attributes = vec![vkraw::VkVertexInputAttributeDescription {
+				location: 0,
+				binding: 0,
+				format: vkraw::VkFormat::VK_FORMAT_R32G32B32_SFLOAT,
+				offset: 0
+			},
+			vkraw::VkVertexInputAttributeDescription {
+				location: 1,
+				binding: 0,
+				format: vkraw::VkFormat::VK_FORMAT_R32G32B32_SFLOAT,
+				offset: 12 // TODO get this from somewhere
+			}];
+		let vertex_input = vkraw::VkPipelineVertexInputStateCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: 0,
+			vertexBindingDescriptionCount: self.vertex_bindings.len() as u32,
+			pVertexBindingDescriptions: self.vertex_bindings.as_ptr(),
+			vertexAttributeDescriptionCount: self.vertex_attributes.len() as u32,
+			pVertexAttributeDescriptions: self.vertex_attributes.as_ptr()
+		};
+		
+		let input_assembly = vkraw::VkPipelineInputAssemblyStateCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: 0,
+			topology: vkraw::VkPrimitiveTopology::VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+			primitiveRestartEnable: vkraw::VK_FALSE
+		};
+		self.viewports = vec![vkraw::VkViewport {
+			x: 0.0,
+			y: 0.0,
+			width: width as f32,
+			height: height as f32,
+			minDepth: 0.0,
+			maxDepth: 1.0
+		}];
+		self.scissors = vec![vkraw::VkRect2D {
+			offset: vkraw::VkOffset2D {
+				x: 0,
+				y: 0
+			},
+			extent: vkraw::VkExtent2D {
+				width: width,
+				height: height
+			}
+		}];
+		let viewport = vkraw::VkPipelineViewportStateCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: 0,
+			viewportCount: self.viewports.len() as u32,
+			pViewports: self.viewports.as_ptr(),
+			scissorCount: self.scissors.len() as u32,
+			pScissors: self.scissors.as_ptr()
+		};
+		let rasterisation = vkraw::VkPipelineRasterizationStateCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: 0,
+			depthClampEnable: vkraw::VK_FALSE,
+			rasterizerDiscardEnable: vkraw::VK_FALSE,
+			polygonMode: vkraw::VkPolygonMode::VK_POLYGON_MODE_FILL,
+			cullMode: vkraw::VkCullModeFlags::VK_CULL_MODE_NONE,
+			frontFace: vkraw::VkFrontFace::VK_FRONT_FACE_COUNTER_CLOCKWISE,
+			depthBiasEnable: vkraw::VK_FALSE,
+			depthBiasConstantFactor: 0.0,
+			depthBiasClamp: 0.0,
+			depthBiasSlopeFactor: 0.0,
+			lineWidth: 1.0
+		};
+		let multisample = vkraw::VkPipelineMultisampleStateCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: 0,
+			rasterizationSamples: vkraw::VkSampleCountFlagBits::VK_SAMPLE_COUNT_1_BIT,
+			sampleShadingEnable: vkraw::VK_FALSE,
+			minSampleShading: 0.0,
+			pSampleMask: ptr::null(),
+			alphaToCoverageEnable: vkraw::VK_FALSE,
+			alphaToOneEnable: vkraw::VK_FALSE
+		};
+		let depth_stencil = vkraw::VkPipelineDepthStencilStateCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: 0,
+			depthTestEnable: vkraw::VK_TRUE,
+			depthWriteEnable: vkraw::VK_TRUE,
+			depthCompareOp: vkraw::VkCompareOp::VK_COMPARE_OP_LESS_OR_EQUAL,
+			depthBoundsTestEnable: vkraw::VK_FALSE,
+			stencilTestEnable: vkraw::VK_FALSE,
+			front: vkraw::VkStencilOpState {
+				failOp: vkraw::VkStencilOp::VK_STENCIL_OP_KEEP,
+				passOp: vkraw::VkStencilOp::VK_STENCIL_OP_KEEP,
+				depthFailOp: vkraw::VkStencilOp::VK_STENCIL_OP_KEEP,
+				compareOp: vkraw::VkCompareOp::VK_COMPARE_OP_ALWAYS,
+				compareMask: 0,
+				writeMask: 0,
+				reference: 0
+			},
+			back: vkraw::VkStencilOpState {
+				failOp: vkraw::VkStencilOp::VK_STENCIL_OP_KEEP,
+				passOp: vkraw::VkStencilOp::VK_STENCIL_OP_KEEP,
+				depthFailOp: vkraw::VkStencilOp::VK_STENCIL_OP_KEEP,
+				compareOp: vkraw::VkCompareOp::VK_COMPARE_OP_ALWAYS,
+				compareMask: 0,
+				writeMask: 0,
+				reference: 0
+			},
+			minDepthBounds: 0.0,
+			maxDepthBounds: 1.0
+		};
+		self.blend_attachments = vec![vkraw::VkPipelineColorBlendAttachmentState {
+			blendEnable: vkraw::VK_FALSE,
+			srcColorBlendFactor: vkraw::VkBlendFactor::VK_BLEND_FACTOR_ZERO,
+			dstColorBlendFactor: vkraw::VkBlendFactor::VK_BLEND_FACTOR_ZERO,
+			colorBlendOp: vkraw::VkBlendOp::VK_BLEND_OP_ADD ,
+			srcAlphaBlendFactor: vkraw::VkBlendFactor::VK_BLEND_FACTOR_ZERO,
+			dstAlphaBlendFactor: vkraw::VkBlendFactor::VK_BLEND_FACTOR_ZERO,
+			alphaBlendOp: vkraw::VkBlendOp::VK_BLEND_OP_ADD ,
+			colorWriteMask: vkraw::VkColorComponentFlags::all()
+		}];
+		let colour_blend = vkraw::VkPipelineColorBlendStateCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: 0,
+			logicOpEnable: vkraw::VK_FALSE,
+			logicOp: vkraw::VkLogicOp::VK_LOGIC_OP_CLEAR,
+			attachmentCount: self.blend_attachments.len() as u32,
+			pAttachments: self.blend_attachments.as_ptr(),
+			blendConstants: [0.0, 0.0, 0.0, 0.0]
+		};
+		let dynamic = vkraw::VkPipelineDynamicStateCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: 0,
+			dynamicStateCount: 0,
+			pDynamicStates: ptr::null()
+		};
+		self.vertex_input = Some(vertex_input);
+		self.input_assembly = Some(input_assembly);
+		self.viewport = Some(viewport);
+		self.rasterisation = Some(rasterisation);
+		self.multisample = Some(multisample);
+		self.depth_stencil = Some(depth_stencil);
+		self.colour_blend = Some(colour_blend);
+		self.dynamic = Some(dynamic);
+		self.shader_stages = vec![
+			ShaderStage {
+				module: vertex_shader,
+				entry_point: "main".to_string(),
+				stage: vkraw::VkShaderStageFlagBits::VK_SHADER_STAGE_VERTEX_BIT
+			},
+			ShaderStage {
+				module: fragment_shader,
+				entry_point: "main".to_string(),
+				stage: vkraw::VkShaderStageFlagBits::VK_SHADER_STAGE_FRAGMENT_BIT
+			},
+		];
+		self
 	}
 	pub fn create(&self) -> Result<Pipeline<'a>, vkraw::VkResult> {
 
@@ -1841,5 +2168,75 @@ impl<'a> DescriptorSet<'a> {
 		unsafe {
 			vkraw::vkUpdateDescriptorSets(self.descriptor_pool.device.device, 1, &write_ds, 0, ptr::null());
 		}
+	}
+}
+
+impl<'a> CommandBuffer<'a> {
+	pub fn begin<'y>(&'y mut self) -> Result<&'y mut Self, vkraw::VkResult> {
+	
+		let begin_info = vkraw::VkCommandBufferBeginInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+			pNext: ptr::null(),
+			flags: vkraw::VkCommandBufferUsageFlags::_EMPTY,
+			pInheritanceInfo: ptr::null()
+		};
+		let res;
+		unsafe {
+			res = vkraw::vkBeginCommandBuffer(self.command_buffer, &begin_info);
+		}
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(self)
+		} else {
+			Err(res)
+		}
+	}
+	pub fn reset<'y>(&'y mut self) -> Result<&'y mut Self, vkraw::VkResult> {
+		let res;
+		unsafe {
+			res = vkraw::vkResetCommandBuffer(self.command_buffer, vkraw::VkCommandBufferResetFlags::_EMPTY);
+		}
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(self)
+		} else {
+			Err(res)
+		}
+	}
+	pub fn begin_render_pass<'y>(&'y mut self, width: u32, height: u32, render_pass: &RenderPass, clear_values: Vec<ClearValue>, framebuffer: Option<&Framebuffer>) -> &'y mut Self {
+
+		let mut raw_clear_values = Vec::<vkraw::VkClearValue>::new();
+		for cv in clear_values {
+			match cv {
+				ClearValue::Colourf32(c) => { raw_clear_values.push(vkraw::VkClearValue { colour: vkraw::VkClearColorValue { float32: c } }) }
+				ClearValue::Colouri32(c) => { raw_clear_values.push(vkraw::VkClearValue { colour: vkraw::VkClearColorValue { int32: c } }) }
+				ClearValue::Colouru32(c) => { raw_clear_values.push(vkraw::VkClearValue { colour: vkraw::VkClearColorValue { uint32: c } }) }
+				ClearValue::DepthStencil{ depth: depth, stencil: stencil } => { raw_clear_values.push(vkraw::VkClearValue { depthStencil: vkraw::VkClearDepthStencilValue { depth: depth, stencil: stencil } }) }
+			}
+		}
+
+		let mut rp_begin_info = vkraw::VkRenderPassBeginInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+			pNext: ptr::null(),
+			renderPass: render_pass.render_pass,
+			framebuffer: vkraw::VK_NULL_HANDLE,
+			renderArea: vkraw::VkRect2D {
+				offset: vkraw::VkOffset2D {
+					x: 0,
+					y: 0
+				},
+				extent: vkraw::VkExtent2D {
+					width: width,
+					height: height
+				}
+			},
+			clearValueCount: raw_clear_values.len() as u32,
+			pClearValues: raw_clear_values.as_ptr()
+		};
+		if let Some(fb) = framebuffer {
+			rp_begin_info.framebuffer = fb.framebuffer;
+		}
+		unsafe {
+			vkraw::vkCmdBeginRenderPass(self.command_buffer, &rp_begin_info, vkraw::VkSubpassContents::VK_SUBPASS_CONTENTS_INLINE);
+		}
+		self
 	}
 }

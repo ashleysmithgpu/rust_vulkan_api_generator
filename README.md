@@ -13,7 +13,7 @@ vkgen is a binary to convert the vulkan vk.xml file to an API usable in rust.
 I.e.
 ```bash
 cd vkgen
-wget https://raw.githubusercontent.com/KhronosGroup/Vulkan-LoaderAndValidationLayers/master/scripts/vk.xml
+wget https://raw.githubusercontent.com/KhronosGroup/Vulkan-Headers/master/registry/vk.xml
 cargo build
 mkdir ../vkraw/src/
 target/debug/vkgen vk.xml -o ../vkraw/src/lib.rs

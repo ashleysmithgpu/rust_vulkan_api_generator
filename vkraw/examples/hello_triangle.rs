@@ -174,14 +174,11 @@ fn load_spirv_shader_from_disk(device: vkraw::VkDevice, filename: &str) -> Optio
 // Finds a memory type that supports exactly the properties we want
 fn get_memory_type(type_bits: u32, properties: vkraw::VkMemoryPropertyFlags, device_memory_properties: &vkraw::VkPhysicalDeviceMemoryProperties) -> Option<u32> {
 
-	let mut type_bits_mut = type_bits.clone();
 	for i in 0..device_memory_properties.memoryTypeCount {
-		if (type_bits_mut & 1) == 1 {
-			if (device_memory_properties.memoryTypes[i as usize].propertyFlags & properties) == properties {
-				return Some(i)
-			}
+		if (type_bits & (1 << i)) > 0 &&
+			(device_memory_properties.memoryTypes[i as usize].propertyFlags & properties == properties) {
+			return Some(i)
 		}
-		type_bits_mut >>= 1;
 	}
 	None
 }
@@ -316,7 +313,9 @@ fn main() {
 
 	#[cfg(feature = "xcb")]
 	let protocols;
+	#[cfg(feature = "xcb")]
 	let wm_delete_window;
+	#[cfg(feature = "xcb")]
 	let wm_protocols;
 
 	#[cfg(feature = "xcb")]
@@ -552,7 +551,7 @@ fn main() {
 				let img_create_info = vkraw::VkImageViewCreateInfo {
 					sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
 					pNext: ptr::null(),
-					flags: 0,
+					flags: vkraw::VkImageViewCreateFlagBits::_EMPTY,
 					image: swapchain_images[i as usize],
 					viewType: vkraw::VkImageViewType::VK_IMAGE_VIEW_TYPE_2D,
 					format: colour_format,
@@ -654,7 +653,7 @@ fn main() {
 				let ds_view = vkraw::VkImageViewCreateInfo {
 					sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
 					pNext: ptr::null(),
-					flags: 0,
+					flags: vkraw::VkImageViewCreateFlagBits::_EMPTY,
 					image: ds_image,
 					viewType: vkraw::VkImageViewType::VK_IMAGE_VIEW_TYPE_2D,
 					format: depth_format,
@@ -733,26 +732,6 @@ fn main() {
 					preserveAttachmentCount: 0,
 					pPreserveAttachments: ptr::null()
 				};
-				let dependencies = [
-					vkraw::VkSubpassDependency {
-						srcSubpass: vkraw::VK_SUBPASS_EXTERNAL as u32,
-						dstSubpass: 0,
-						srcStageMask: vkraw::VkPipelineStageFlags::VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-						dstStageMask: vkraw::VkPipelineStageFlags::VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-						srcAccessMask: vkraw::VkAccessFlags::VK_ACCESS_MEMORY_READ_BIT,
-						dstAccessMask: vkraw::VkAccessFlags::VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | vkraw::VkAccessFlags::VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-						dependencyFlags: vkraw::VkDependencyFlags::VK_DEPENDENCY_BY_REGION_BIT,
-					},
-					vkraw::VkSubpassDependency {
-						srcSubpass: 0,
-						dstSubpass: vkraw::VK_SUBPASS_EXTERNAL as u32,
-						srcStageMask: vkraw::VkPipelineStageFlags::VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-						dstStageMask: vkraw::VkPipelineStageFlags::VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-						srcAccessMask: vkraw::VkAccessFlags::VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | vkraw::VkAccessFlags::VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-						dstAccessMask: vkraw::VkAccessFlags::VK_ACCESS_MEMORY_READ_BIT,
-						dependencyFlags: vkraw::VkDependencyFlags::VK_DEPENDENCY_BY_REGION_BIT,
-					}
-				];
 				let render_pass_create_info = vkraw::VkRenderPassCreateInfo {
 					sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
 					pNext: ptr::null(),
@@ -761,8 +740,8 @@ fn main() {
 					pAttachments: attachments.as_ptr(),
 					subpassCount: 1,
 					pSubpasses: &subpass,
-					dependencyCount: dependencies.len() as u32,
-					pDependencies: dependencies.as_ptr()
+					dependencyCount: 0,
+					pDependencies: ptr::null()
 				};
 
 				unsafe {
