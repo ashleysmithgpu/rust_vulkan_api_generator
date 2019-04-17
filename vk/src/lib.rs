@@ -1057,6 +1057,12 @@ impl<'a> Device<'a> {
 			Err(res)
 		}
 	}
+	
+	pub fn wait_idle(&self) {
+		unsafe {
+			vkraw::vkDeviceWaitIdle(self.device);
+		}
+	}
 }
 
 pub struct ImageBuilder<'a> {
@@ -2201,7 +2207,7 @@ impl<'a> CommandBuffer<'a> {
 			Err(res)
 		}
 	}
-	pub fn begin_render_pass<'y>(&'y mut self, width: u32, height: u32, render_pass: &RenderPass, clear_values: Vec<ClearValue>, framebuffer: Option<&Framebuffer>) -> &'y mut Self {
+	pub fn begin_render_pass<'y>(&'y mut self, width: u32, height: u32, render_pass: &'y RenderPass<'y>, clear_values: Vec<ClearValue>, framebuffer: Option<&Framebuffer>) -> &'y mut Self {
 
 		let mut raw_clear_values = Vec::<vkraw::VkClearValue>::new();
 		for cv in clear_values {
@@ -2238,5 +2244,79 @@ impl<'a> CommandBuffer<'a> {
 			vkraw::vkCmdBeginRenderPass(self.command_buffer, &rp_begin_info, vkraw::VkSubpassContents::VK_SUBPASS_CONTENTS_INLINE);
 		}
 		self
+	}
+	pub fn bind_descriptor_sets<'y>(&'y mut self, bind_point: vkraw::VkPipelineBindPoint, pipeline_layout: &'y PipelineLayout<'y>, first_set: u32, sets: Vec<&'y DescriptorSet<'y>>, offsets: Vec<u32>) -> &'y mut Self {
+
+		let sets: Vec<vkraw::VkDescriptorSet> = sets.iter().map(|x| { x.descriptor_set }).collect();
+
+		unsafe {
+			vkraw::vkCmdBindDescriptorSets(self.command_buffer, bind_point, pipeline_layout.pipeline_layout, first_set, sets.len() as u32, sets.as_ptr(), offsets.len() as u32, offsets.as_ptr());
+		}
+		self
+	}
+	pub fn bind_pipeline<'y>(&'y mut self, bind_point: vkraw::VkPipelineBindPoint, pipeline: &'y Pipeline<'y>) -> &'y mut Self {
+		unsafe {
+			vkraw::vkCmdBindPipeline(self.command_buffer, bind_point, pipeline.pipeline);
+		}
+		self
+	}
+	pub fn bind_vertex_buffers<'y>(&'y mut self, first_binding: u32, buffers_offsets: Vec<(&'y Buffer<'y>, u64)>) -> &'y mut Self {
+
+		let offsets: Vec<u64> = buffers_offsets.iter().map(|x| { x.1 }).collect();
+		let buffers: Vec<vkraw::VkBuffer> = buffers_offsets.iter().map(|x| { x.0.buffer }).collect();
+
+		unsafe {
+			vkraw::vkCmdBindVertexBuffers(self.command_buffer, first_binding, buffers_offsets.len() as u32, buffers.as_ptr(), offsets.as_ptr());
+		}
+		self
+	}
+	pub fn bind_index_buffer<'y>(&'y mut self, buffer: &'y Buffer<'y>, offset: u64, index_type: vkraw::VkIndexType) -> &'y mut Self {
+		unsafe {
+			vkraw::vkCmdBindIndexBuffer(self.command_buffer, buffer.buffer, offset, index_type);
+		}
+		self
+	}
+	pub fn draw_indexed<'y>(&'y mut self, index_count: u32, instance_count: u32, first_index: u32, vertex_offset: i32, first_instance: u32) -> &'y mut Self {
+		unsafe {                                                                                                   
+			vkraw::vkCmdDrawIndexed(self.command_buffer, index_count, instance_count, first_index, vertex_offset, first_instance);
+		}
+		self
+	}
+	pub fn end_render_pass<'y>(&'y mut self) -> &'y mut Self {
+		unsafe {
+			vkraw::vkCmdEndRenderPass(self.command_buffer);
+		}
+		self
+	}
+	pub fn end_command_buffer<'y>(&'y mut self) -> &'y mut Self {
+		unsafe {
+			vkraw::vkEndCommandBuffer(self.command_buffer);
+		}
+		self
+	}
+}
+
+impl<'a> Fence<'a> {
+	pub fn wait<'y>(&'y mut self, timeout: u64) -> Result<&'y mut Self, vkraw::VkResult> {
+		let res;
+		unsafe {
+			res = vkraw::vkWaitForFences(self.device.device, 1, &self.fence, vkraw::VK_TRUE, std::u64::MAX);
+		}
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(self)
+		} else {
+			Err(res)
+		}
+	}
+	pub fn reset<'y>(&'y mut self) -> Result<&'y mut Self, vkraw::VkResult> {
+		let res;
+		unsafe {
+			res = vkraw::vkResetFences(self.device.device, 1, &self.fence);
+		}
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(self)
+		} else {
+			Err(res)
+		}
 	}
 }

@@ -5,6 +5,7 @@ use rspirv::binary::Assemble;
 use rspirv::binary::Disassemble;
 
 use std::ptr;
+
 fn main() {
 
 	let args: Vec<String> = std::env::args().collect();
@@ -45,7 +46,6 @@ fn main() {
 	
 	let mut hdr = args.iter().find(|&x| x == "hdr").is_some();
 
-	let formats = physical_device.supported_surface_formats2(hdr, &wsi_info).unwrap();
 	let caps = physical_device.surface_capabilities(&wsi_info.0).unwrap();
 	let modes = physical_device.present_modes(&wsi_info.0).unwrap();
 	
@@ -169,8 +169,11 @@ fn main() {
 
 	'swapchain_setup: while !quit {
 		
-		let mut format;
-		let mut colour_space;
+		let format;
+		let colour_space;
+
+		let formats = physical_device.supported_surface_formats2(hdr, &wsi_info).unwrap();
+
 		if hdr {
 			format = vkraw::VkFormat::VK_FORMAT_A2R10G10B10_UNORM_PACK32;
 			colour_space = vkraw::VkColorSpaceKHR::VK_COLOR_SPACE_BT2020_LINEAR_EXT;
@@ -194,14 +197,14 @@ fn main() {
 		
 		let swapchain = swapchain.as_ref().unwrap();
 
-		let fences = vec![
+		let mut fences = vec![
 			device.create_fence().unwrap(),
 			device.create_fence().unwrap(),
 			device.create_fence().unwrap()
 		];
 
-		let mut swapchain_images = swapchain.get_swapchain_images();
-		let mut swapchain_image_views: Vec<vk::ImageView> = swapchain_images.iter().map(|x| vk::ImageViewBuilder::new(x, format).create().unwrap()).collect();
+		let swapchain_images = swapchain.get_swapchain_images();
+		let swapchain_image_views: Vec<vk::ImageView> = swapchain_images.iter().map(|x| vk::ImageViewBuilder::new(x, format).create().unwrap()).collect();
 
 		let mut command_buffers = command_pool.create_command_buffers(swapchain_images.len()).unwrap();
 
@@ -217,9 +220,9 @@ fn main() {
 		let ds_image_mem = mem.allocate_image_memory(&ds_image, vk::staging_memory(&heaps));
 		let ds_image_view = vk::ImageViewBuilder::new(&ds_image, vkraw::VkFormat::VK_FORMAT_D32_SFLOAT).depth_view().create().unwrap();
 
-		let mut render_pass = vk::RenderPassBuilder::new(&device).default_single_colour_depth(format, vkraw::VkFormat::VK_FORMAT_D32_SFLOAT).create().unwrap();
+		let render_pass = vk::RenderPassBuilder::new(&device).default_single_colour_depth(format, vkraw::VkFormat::VK_FORMAT_D32_SFLOAT).create().unwrap();
 
-		let mut framebuffers = {
+		let framebuffers = {
 			let mut fbb = vk::FramebufferBuilder::new(&device);
 			fbb.width = width as usize;
 			fbb.height = height as usize;
@@ -230,59 +233,12 @@ fn main() {
 				fbb.set_attachments(vec![&swapchain_image_views[1], &ds_image_view]).create().unwrap()]
 		};
 
-		
-
-		let mut pipeline = {
+		let pipeline = {
 			let mut pb = vk::PipelineBuilder::new(&device, &pipeline_layout, &render_pass);
 			let vsh = device.load_spirv_shader_from_disk("triangle.vert.spv").unwrap();
 			let fsh = device.load_spirv_shader_from_buffer(&fshspirv).unwrap();
 			pb.default_graphics(vsh, fsh, width, height).create().unwrap()
 		};
-
-	/*
-		for i in 0..2 {		
-			command_buffers[i as usize].begin().unwrap().
-				begin_render_pass(width, height, &render_pass, vec![
-					vk::ClearValue::Colourf32([0.0, 0.0, 0.0, 0.0]),
-					vk::ClearValue::DepthStencil{ depth: 1.0, stencil: 0 }], Some(&framebuffers[i as usize]));
-
-			let vp = vkraw::VkViewport {
-				x: 0.0,
-				y: 0.0,
-				width: width as f32,
-				height: height as f32,
-				minDepth: 0.0,
-				maxDepth: 1.0,
-			};
-			unsafe {
-			//	vkraw::vkCmdSetViewport(command_buffers[i as usize].command_buffer, 0, 1, &vp);
-			}
-			let sc = vkraw::VkRect2D {
-				offset: vkraw::VkOffset2D {
-					x: 0,
-					y: 0
-				},
-				extent: vkraw::VkExtent2D {
-					width: width,
-					height: height
-				}
-			};
-			let offset = 0;
-			unsafe {
-				//vkraw::vkCmdSetScissor(command_buffers[i as usize].command_buffer, 0, 1, &sc);
-				vkraw::vkCmdBindDescriptorSets(command_buffers[i as usize].command_buffer, vkraw::VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout.pipeline_layout, 0, 1, &descriptor_sets[(i % 2) as usize].descriptor_set, 0, ptr::null());
-				vkraw::vkCmdBindPipeline(command_buffers[i as usize].command_buffer, vkraw::VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.pipeline);
-				vkraw::vkCmdBindVertexBuffers(command_buffers[i as usize].command_buffer, 0, 1, &vertex_buffer.buffer, &offset);
-				vkraw::vkCmdBindIndexBuffer(command_buffers[i as usize].command_buffer, index_buffer.buffer, 0, vkraw::VkIndexType::VK_INDEX_TYPE_UINT32);
-				vkraw::vkCmdDrawIndexed(command_buffers[i as usize].command_buffer, 6, 1, 0, 0, 1);
-				vkraw::vkCmdEndRenderPass(command_buffers[i as usize].command_buffer);
-				vkraw::vkEndCommandBuffer(command_buffers[i as usize].command_buffer);
-			}
-		}*/
-
-
-
-
 
 		let mut rotation_start = std::time::Instant::now();
 		let mut frame_index = 0;
@@ -346,7 +302,8 @@ fn main() {
 						winapi::um::winuser::WM_KEYDOWN => {
 							println!("WM_KEYDOWN {}", message.wParam);
 							if message.wParam == 32 {
-								//rotate = true;
+							} else if message.wParam == 82 {
+								rotate = true;
 							} else {
 								quit = true;
 							}
@@ -354,8 +311,9 @@ fn main() {
 						},
 						winapi::um::winuser::WM_KEYUP => {
 							println!("WM_KEYUP");
-							if message.wParam == 32 {
+							if message.wParam == 82 {
 								rotate = false;
+							} else if message.wParam == 32 {
 								hdr = !hdr;
 								recreate_swapchain = true;
 							} else {
@@ -394,16 +352,9 @@ fn main() {
 			assert!(res == vkraw::VkResult::VK_SUCCESS);
 
 			if frame_index > 1 {
-				unsafe {
-					res = vkraw::vkWaitForFences(device.device, 1, &fences[current_buffer as usize].fence, vkraw::VK_TRUE, std::u64::MAX);
-				}
-				assert!(res == vkraw::VkResult::VK_SUCCESS);
-				unsafe {
-					res = vkraw::vkResetFences(device.device, 1, &fences[current_buffer as usize].fence);
-				}
-				assert!(res == vkraw::VkResult::VK_SUCCESS);
+				fences[current_buffer as usize].wait(std::u64::MAX).unwrap()
+					.reset().unwrap();
 			}
-
 
 			{
 				if !rotate {
@@ -430,27 +381,19 @@ fn main() {
 					}
 				}
 			}
-			
-			
-			{
-				let cmdb = &mut command_buffers[current_buffer as usize];
-				cmdb.begin().unwrap().
-					begin_render_pass(width, height, &render_pass, vec![
-						vk::ClearValue::Colourf32([0.0, 0.0, 0.0, 0.0]),
-						vk::ClearValue::DepthStencil{ depth: 1.0, stencil: 0 }], Some(&framebuffers[current_buffer as usize]));
-				let offset = 0;
-				unsafe {
-					vkraw::vkCmdBindDescriptorSets(cmdb.command_buffer, vkraw::VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout.pipeline_layout, 0, 1, &descriptor_sets[(current_buffer % 2) as usize].descriptor_set, 0, ptr::null());
-					vkraw::vkCmdBindPipeline(cmdb.command_buffer, vkraw::VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.pipeline);
-					vkraw::vkCmdBindVertexBuffers(cmdb.command_buffer, 0, 1, &vertex_buffer.buffer, &offset);
-					vkraw::vkCmdBindIndexBuffer(cmdb.command_buffer, index_buffer.buffer, 0, vkraw::VkIndexType::VK_INDEX_TYPE_UINT32);
-					vkraw::vkCmdDrawIndexed(cmdb.command_buffer, 6, 1, 0, 0, 1);
-					vkraw::vkCmdEndRenderPass(cmdb.command_buffer);
-					vkraw::vkEndCommandBuffer(cmdb.command_buffer);
-				}
-			}
-			
-			
+
+			command_buffers[current_buffer as usize]
+				.begin().unwrap()
+				.begin_render_pass(width, height, &render_pass, vec![
+					vk::ClearValue::Colourf32([0.0, 0.0, 0.0, 0.0]),
+					vk::ClearValue::DepthStencil{ depth: 1.0, stencil: 0 }], Some(&framebuffers[current_buffer as usize]))
+				.bind_descriptor_sets(vkraw::VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, &pipeline_layout, 0, vec![&descriptor_sets[(current_buffer % 2) as usize]], vec![])
+				.bind_pipeline(vkraw::VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, &pipeline)
+				.bind_vertex_buffers(0, vec![(&vertex_buffer, 0)])
+				.bind_index_buffer(&index_buffer, 0, vkraw::VkIndexType::VK_INDEX_TYPE_UINT32)
+				.draw_indexed(6, 1, 0, 0, 1)
+				.end_render_pass()
+				.end_command_buffer();
 
 			let wait_stage_mask = vkraw::VkPipelineStageFlags::VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 			let submit_info = vkraw::VkSubmitInfo {
@@ -485,11 +428,7 @@ fn main() {
 			instance.vk.QueuePresentKHR.unwrap()(graphics_queue, &present_info);
 			frame_index += 1;
 		}
-		unsafe {
-			vkraw::vkDeviceWaitIdle(device.device);
-		}
+		device.wait_idle();
 	}
-	unsafe {
-		vkraw::vkDeviceWaitIdle(device.device);
-	}
+	device.wait_idle();
 }
