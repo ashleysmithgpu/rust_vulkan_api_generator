@@ -20,9 +20,9 @@ vkraw = { path = "../vkraw", version = "0.0.1", features = ["VK_KHR_win32_surfac
 winapi = { version = "0.3.6", features = ["winuser", "libloaderapi"] }
 
 # Enable after issue fixed: https://github.com/rust-lang/cargo/issues/2524
-[target.'cfg(asd)'.dependencies]
-#vkraw = { path = "../vkraw", version = "0.0.1", features = ["xcb", "VK_KHR_xcb_surface"] }
-#xcb = { version = "0.8" }
+[target.'cfg(unix)'.dependencies]
+vkraw = { path = "../vkraw", version = "0.0.1", features = ["xcb", "VK_KHR_xcb_surface", "VK_KHR_get_surface_capabilities2", "VK_EXT_swapchain_colorspace", "VK_EXT_full_screen_exclusive"] }
+xcb = { version = "0.8" }
 
 [dev-dependencies]
 gltf = "0.11.3"

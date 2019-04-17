@@ -175,7 +175,7 @@ impl Default for InstanceBuilder {
 				"VK_KHR_xcb_surface".to_string(),
 				"VK_KHR_get_surface_capabilities2".to_string(),
 
-				"VK_EXT_swapchain_colorspace".to_string(),
+				//"VK_EXT_swapchain_colorspace".to_string(),
 
 				"VK_KHR_get_physical_device_properties2".to_string(),
 				//"VK_KHR_swapchain".to_string(),
@@ -385,7 +385,7 @@ impl Instance {
 				xcb::WINDOW_CLASS_INPUT_OUTPUT as u16,
 				screen.root_visual(), &[
 					(xcb::CW_BACK_PIXEL, screen.white_pixel()),
-					(xcb::CW_EVENT_MASK, xcb::EVENT_MASK_EXPOSURE | xcb::EVENT_MASK_KEY_PRESS),
+					(xcb::CW_EVENT_MASK, xcb::EVENT_MASK_EXPOSURE | xcb::EVENT_MASK_KEY_PRESS | xcb::EVENT_MASK_KEY_RELEASE),
 				]
 			);
 			xcb::map_window(&conn, win);
@@ -566,6 +566,41 @@ impl<'a> PhysicalDevice<'a> {
 		}
 	}
 
+	#[cfg(unix)]
+	pub fn supported_surface_formats2(&self, hdr: bool, wsi_info: &(Surface, xcb::Connection, u32)) -> Result<Vec<vkraw::VkSurfaceFormat2KHR>, vkraw::VkResult> {
+
+		let fullscreen_info = vkraw::VkSurfaceFullScreenExclusiveInfoEXT {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_SURFACE_FULL_SCREEN_EXCLUSIVE_INFO_EXT,
+			pNext: ptr::null_mut(),
+			fullScreenExclusive: vkraw::VkFullScreenExclusiveEXT::VK_FULL_SCREEN_EXCLUSIVE_APPLICATION_CONTROLLED_EXT
+		};
+
+		let surface_info = vkraw::VkPhysicalDeviceSurfaceInfo2KHR {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SURFACE_INFO_2_KHR,
+			pNext: if hdr { unsafe { mem::transmute(&fullscreen_info) } } else { ptr::null_mut() },
+			surface: wsi_info.0.surface
+		};
+	
+		// Get a supported colour format and colour space
+		let mut format_count = 0;
+		assert!(self.instance.vk.GetPhysicalDeviceSurfaceFormats2KHR.is_some());
+		self.instance.vk.GetPhysicalDeviceSurfaceFormats2KHR.unwrap()(self.physical_device, &surface_info, &mut format_count, ptr::null_mut());
+
+		assert!(format_count > 0);
+
+		let mut surface_formats = vec![vkraw::VkSurfaceFormat2KHR { sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR, pNext: ptr::null_mut(), surfaceFormat: vkraw::VkSurfaceFormatKHR { format: vkraw::VkFormat::VK_FORMAT_UNDEFINED, colorSpace: vkraw::VkColorSpaceKHR::VK_COLOR_SPACE_SRGB_NONLINEAR_KHR }, }; format_count as usize];
+
+		assert!(self.instance.vk.GetPhysicalDeviceSurfaceFormats2KHR.is_some());
+		let res = self.instance.vk.GetPhysicalDeviceSurfaceFormats2KHR.unwrap()(self.physical_device, &surface_info, &mut format_count, surface_formats.as_mut_ptr());
+
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(surface_formats)
+		} else {
+			Err(res)
+		}
+	}
+
+	#[cfg(windows)]
 	pub fn supported_surface_formats2(&self, hdr: bool, wsi_info: &(Surface, winapi::shared::windef::HWND, winapi::shared::minwindef::HINSTANCE)) -> Result<Vec<vkraw::VkSurfaceFormat2KHR>, vkraw::VkResult> {
 
 		let fullscreen_info = vkraw::VkSurfaceFullScreenExclusiveInfoEXT {
@@ -591,37 +626,12 @@ impl<'a> PhysicalDevice<'a> {
 		self.instance.vk.GetPhysicalDeviceSurfaceFormats2KHR.unwrap()(self.physical_device, &surface_info, &mut format_count, ptr::null_mut());
 
 		assert!(format_count > 0);
-		/*let mut surface_formats = Vec::<vkraw::VkSurfaceFormat2KHR>::with_capacity(format_count as usize);
-		unsafe {
-			surface_formats.set_len(format_count as usize);
-		}*/
-				
-		//println!("num formats {}", format_count);
+
 		let mut surface_formats = vec![vkraw::VkSurfaceFormat2KHR { sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR, pNext: ptr::null_mut(), surfaceFormat: vkraw::VkSurfaceFormatKHR { format: vkraw::VkFormat::VK_FORMAT_UNDEFINED, colorSpace: vkraw::VkColorSpaceKHR::VK_COLOR_SPACE_SRGB_NONLINEAR_KHR }, }; format_count as usize];
 
-		println!("num formats {}", format_count);
-	//println!("asdf 1 {:?}", surface_formats[17]);
 		assert!(self.instance.vk.GetPhysicalDeviceSurfaceFormats2KHR.is_some());
 		let res = self.instance.vk.GetPhysicalDeviceSurfaceFormats2KHR.unwrap()(self.physical_device, &surface_info, &mut format_count, surface_formats.as_mut_ptr());
 
-		println!("num formats {}", format_count);
-	
-	/*for x in 0..surface_formats.len() {
-	unsafe {
-	let view = &surface_formats[x] as *const _ as *const u8;
-    for i in 0 .. mem::size_of::<vkraw::VkSurfaceFormat2KHR>() {
-        print!("{:02x} ", unsafe {*view.offset(i as isize)});
-    }
-	};
-	print!("\n");*/
-	
-	//println!("asdf 2 {:?}", surface_formats[x].sType);
-	//println!("asdf 2 {:?}", surface_formats[x].pNext);
-	//println!("asdf 2 {:?}", surface_formats[x].surfaceFormat.format);
-	//println!("asdf 2 {:?}", surface_formats[x].surfaceFormat.colorSpace);
-	//}
-	
-	
 		if res == vkraw::VkResult::VK_SUCCESS {
 			Ok(surface_formats)
 		} else {
@@ -685,8 +695,8 @@ impl<'a> DeviceBuilder<'a> {
 			],
 			extensions: vec![
 				"VK_KHR_swapchain".to_string(),
-				"VK_EXT_full_screen_exclusive".to_string(),
-				"VK_AMD_display_native_hdr".to_string(),
+				//"VK_EXT_full_screen_exclusive".to_string(),
+				//"VK_AMD_display_native_hdr".to_string(),
 			],
 			queue_create_infos: vec![(0, vec![1.0])],
 			want_device_name: String::new(),
@@ -1458,13 +1468,11 @@ impl<'a> Mem<'a> {
 			assert!(data != ptr::null_mut());
 		}
 		self.ptr = data as u64;
-		//println!("Mem::map()");
 		MappedMem { mem: self, ptr: &self.ptr, _phantom: std::marker::PhantomData }
 	}
 }
 impl<'a> Drop for Mem<'a> {
 	fn drop(&mut self) {
-		//println!("Mem::drop()");
 		unsafe {
 			vkraw::vkFreeMemory(self.memory_allocator.device.device, self.mem, ptr::null());
 		}
@@ -1490,13 +1498,11 @@ impl<'a, T> std::ops::DerefMut for MappedMem<'a, T> {
 }
 impl<'a, T> MappedMem<'a, T> {
 	pub fn get_ptr(&mut self) -> *mut T {
-		//println!("MappedMem::get_ptr()");
 		unsafe { std::mem::transmute::<u64, *mut T>(*self.ptr) }
 	}
 }
 impl<'a, T> Drop for MappedMem<'a, T> {
 	fn drop(&mut self) {
-		//println!("MappedMem::drop()");
 		unsafe {
 			vkraw::vkUnmapMemory(self.mem.memory_allocator.device.device, self.mem.mem);
 		}

@@ -16,10 +16,38 @@ fn main() {
 		.. Default::default()
 	}.create_instance().expect("Couldn't create instance");
 
-	let width = 2560;
-	let height = 1440;
-	
+	let width = 800;
+	let height = 600;
+
 	let wsi_info = instance.create_wsi(width, height);
+
+	#[cfg(feature = "xcb")]
+	let protocols;
+	let wm_delete_window;
+	let wm_protocols;
+
+	#[cfg(feature = "xcb")]
+	{
+		let (wm_protocols2, wm_delete_window2) = {
+			let pc = xcb::intern_atom(&wsi_info.1, false, "WM_PROTOCOLS");
+			let dwc = xcb::intern_atom(&wsi_info.1, false, "WM_DELETE_WINDOW");
+
+			let p = match pc.get_reply() {
+				Ok(p) => p.atom(),
+				Err(_) => panic!("could not load WM_PROTOCOLS atom")
+			};
+			let dw = match dwc.get_reply() {
+				Ok(dw) => dw.atom(),
+				Err(_) => panic!("could not load WM_DELETE_WINDOW atom")
+			};
+			(p, dw)
+		};
+		protocols = [wm_delete_window2];
+		wm_delete_window = wm_delete_window2;
+		wm_protocols = wm_protocols2;
+
+		xcb::change_property(&wsi_info.1, xcb::PROP_MODE_REPLACE as u8, wsi_info.2, wm_protocols, xcb::ATOM_ATOM, 32, &protocols);
+	}
 
 	let physical_device;
 	let graphics_queue;
@@ -27,7 +55,7 @@ fn main() {
 	let transfer_queue;
 	let device = {
 		let mut db = vk::DeviceBuilder::new(&instance);
-		let device = db.use_device_named("Vega".to_string()).default_queues_physical_device(&wsi_info.0).create_device().expect("Couldn't create logical device");
+		let device = db/*.use_device_named("Vega".to_string())*/.default_queues_physical_device(&wsi_info.0).create_device().expect("Couldn't create logical device");
 
 		let (physical_device2, physical_device_index) = db.physical_device.unwrap();
 		physical_device = physical_device2;
@@ -51,6 +79,11 @@ fn main() {
 	
 	let present_complete_sem = device.create_semaphore().unwrap();
 	let render_complete_sem = device.create_semaphore().unwrap();
+
+	let fences = vec![
+		device.create_fence().unwrap(),
+		device.create_fence().unwrap(),
+	];
 
 	let dsl = {
 		let mut dslb = vk::DescriptorSetLayoutBuilder::new(&device);
@@ -251,7 +284,7 @@ fn main() {
 
 			#[cfg(feature = "xcb")]
 			{
-				let event = wsi_info.0.poll_for_event();
+				let event = wsi_info.1.poll_for_event();
 				match event {
 					None => {}
 					Some(event) => {
@@ -266,7 +299,18 @@ fn main() {
 									xcb::cast_event(&event)
 								};
 								println!("Key {} pressed", key_press.detail());
-								break;
+								if key_press.detail() == 27 {
+									rotate = true;
+								}
+							},
+							xcb::KEY_RELEASE => {
+								let key_release : &xcb::KeyReleaseEvent = unsafe {
+									xcb::cast_event(&event)
+								};
+								println!("Key {} released", key_release.detail());
+								if key_release.detail() == 27 {
+									rotate = false;
+								}
 							},
 							xcb::CLIENT_MESSAGE => {
 								let cmev = unsafe {
@@ -277,7 +321,6 @@ fn main() {
 									if protocol == wm_delete_window {
 										println!("wm_delete_window");
 										quit = true;
-										break;
 									}
 								}
 							},
@@ -286,7 +329,7 @@ fn main() {
 					}
 				}
 			}
-			//#[cfg(feature = "winapi")]
+			#[cfg(feature = "winapi")]
 			unsafe {
 				let mut message: winapi::um::winuser::MSG = std::mem::uninitialized();
 
@@ -362,12 +405,13 @@ fn main() {
 				}
 				let elapsed = rotation_start.elapsed();
 				let rotation = elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1_000_000_000.0;
+				println!("{}", rotation);
 				let rotation = cgmath::Matrix3::from_angle_z(cgmath::Rad(rotation as f32));
 
 				let aspect_ratio = width as f32 / height as f32;
 				let projection = cgmath::perspective(cgmath::Rad(std::f32::consts::FRAC_PI_2), aspect_ratio, 0.01, 100.0);
 				let view = cgmath::Matrix4::look_at(cgmath::Point3::new(0.0, 0.0, 1.0), cgmath::Point3::new(0.0, 0.0, 0.0), cgmath::Vector3::new(0.0, -1.0, 0.0));
-				
+
 				let mut ub_data = UniformBufferData {
 					projection_from_view: projection.into(),
 					view_from_model: view.into(),
@@ -427,6 +471,7 @@ fn main() {
 			assert!(instance.vk.QueuePresentKHR.is_some());
 			instance.vk.QueuePresentKHR.unwrap()(graphics_queue, &present_info);
 			frame_index += 1;
+			println!("frame {} {}", frame_index, rotate);
 		}
 		device.wait_idle();
 	}
