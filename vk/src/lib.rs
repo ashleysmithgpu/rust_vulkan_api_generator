@@ -30,6 +30,11 @@ pub struct Buffer<'a> {
 	pub device: &'a Device<'a>
 }
 
+pub struct Queue<'a> {
+	pub queue: vkraw::VkQueue,
+	pub device: &'a Device<'a>
+}
+
 pub struct Surface<'a> {
 	pub surface: vkraw::VkSurfaceKHR,
 	instance: &'a Instance
@@ -98,6 +103,11 @@ pub struct PipelineLayout<'a> {
 }
 
 pub struct Pipeline<'a> {
+	pub pipeline: vkraw::VkPipeline,
+	pub device: &'a Device<'a>,
+}
+
+pub struct ComputePipeline<'a> {
 	pub pipeline: vkraw::VkPipeline,
 	pub device: &'a Device<'a>,
 }
@@ -408,7 +418,7 @@ impl Instance {
 	}
 
 	#[cfg(windows)]
-	pub fn create_wsi(&self, width: u32, height: u32) -> (Surface, winapi::shared::windef::HWND, winapi::shared::minwindef::HINSTANCE) {
+	pub fn create_wsi(&self, width: u32, height: u32, fullscreen: bool) -> (Surface, winapi::shared::windef::HWND, winapi::shared::minwindef::HINSTANCE) {
 
 		let hinstance;
 		let handle;
@@ -469,9 +479,8 @@ impl Instance {
 			winapi::um::winuser::ShowWindow(handle, winapi::um::winuser::SW_SHOW);
 			winapi::um::winuser::SetForegroundWindow(handle);
 			winapi::um::winuser::SetFocus(handle);
-			
-			// Set fullscreen
-			if true {
+
+			if fullscreen {
 				let style = /*winapi::shared::basetsd::LONG_PTR:*/ winapi::um::winuser::GetWindowLongPtrA(handle, winapi::um::winuser::GWL_STYLE);
 				let exstyle = /*winapi::shared::basetsd::LONG_PTR:*/ winapi::um::winuser::GetWindowLongPtrA(handle, winapi::um::winuser::GWL_EXSTYLE);
 				
@@ -862,15 +871,18 @@ impl<'a> Drop for Device<'a> {
 }
 
 impl<'a> Device<'a> {
-	pub fn get_queue(&self, queue_family_index: u32, queue_index: u32) -> vkraw::VkQueue {
+	pub fn get_queue(&self, queue_family_index: u32, queue_index: u32) -> Option<Queue> {
 		let mut queue;
 		unsafe {
 			queue = std::mem::uninitialized();
 			println!("vkGetDeviceQueue");
 			vkraw::vkGetDeviceQueue(self.device, queue_family_index, queue_index, &mut queue);
 		}
-		assert!(queue != vkraw::VK_NULL_HANDLE);
-		queue
+		if queue != vkraw::VK_NULL_HANDLE {
+			Some(Queue { device: &self, queue: queue })
+		} else {
+			None
+		}
 	}
 	pub fn create_buffer(&self, size: usize, flags: vkraw::VkBufferUsageFlags) -> Result<Buffer, vkraw::VkResult> {
 		let buf_create_info = vkraw::VkBufferCreateInfo {
@@ -1071,6 +1083,71 @@ impl<'a> Device<'a> {
 	pub fn wait_idle(&self) {
 		unsafe {
 			vkraw::vkDeviceWaitIdle(self.device);
+		}
+	}
+}
+
+impl<'a> Queue<'a> {
+	pub fn submit(&self, command_buffers: Vec<&CommandBuffer>, fence: Option<&Fence>, waits: Vec<(&Semaphore, vkraw::VkPipelineStageFlags)>, signals: Vec<&Semaphore>) -> vkraw::VkResult {
+
+		let raw_wait_semaphores: Vec<vkraw::VkSemaphore> = waits.iter().map(|x| x.0.semaphore).collect();
+		let raw_wait_masks: Vec<vkraw::VkPipelineStageFlags> = waits.iter().map(|x| x.1).collect();
+		let raw_signal_semaphores: Vec<vkraw::VkSemaphore> = signals.iter().map(|x| x.semaphore).collect();
+		let raw_cmdbs: Vec<vkraw::VkCommandBuffer> = command_buffers.iter().map(|x| x.command_buffer).collect();
+
+		let wait_stage_mask = vkraw::VkPipelineStageFlags::VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		let submit_info = vkraw::VkSubmitInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_SUBMIT_INFO,
+			pNext: ptr::null(),
+			waitSemaphoreCount: raw_wait_semaphores.len() as u32,
+			pWaitSemaphores: raw_wait_semaphores.as_ptr(),
+			pWaitDstStageMask: raw_wait_masks.as_ptr(),
+			commandBufferCount: raw_cmdbs.len() as u32,
+			pCommandBuffers: raw_cmdbs.as_ptr(),
+			signalSemaphoreCount: raw_signal_semaphores.len() as u32,
+			pSignalSemaphores: raw_signal_semaphores.as_ptr()
+		};
+
+		unsafe {
+			vkraw::vkQueueSubmit(self.queue, 1, &submit_info, if fence.is_some() { fence.unwrap().fence } else { vkraw::VK_NULL_HANDLE })
+		}		
+	}
+	pub fn present(&self, swaps: Vec<(&Semaphore, &Swapchain, u32)>) -> Result<Vec<vkraw::VkResult>, vkraw::VkResult> {
+	
+		let raw_wait_semaphores: Vec<vkraw::VkSemaphore> = swaps.iter().map(|x| x.0.semaphore).collect();
+		let raw_swapchains: Vec<vkraw::VkSwapchainKHR> = swaps.iter().map(|x| x.1.swapchain).collect();
+		let image_indices: Vec<u32> = swaps.iter().map(|x| x.2).collect();
+		
+		let mut results = Vec::<vkraw::VkResult>::with_capacity(swaps.len());
+		
+		let present_info = vkraw::VkPresentInfoKHR {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+			pNext: ptr::null(),
+			waitSemaphoreCount: raw_wait_semaphores.len() as u32,
+			pWaitSemaphores: raw_wait_semaphores.as_ptr(),
+			swapchainCount: raw_swapchains.len() as u32,
+			pSwapchains: raw_swapchains.as_ptr(),
+			pImageIndices: image_indices.as_ptr(),
+			pResults: results.as_mut_ptr()
+		};
+		assert!(self.device.instance.vk.QueuePresentKHR.is_some());
+		let res = self.device.instance.vk.QueuePresentKHR.unwrap()(self.queue, &present_info);
+		
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(results)
+		} else {
+			Err(res)
+		}
+	}
+	pub fn acquire(&self, swapchain: &Swapchain, timeout: u64, semaphore: Option<&Semaphore>, fence: Option<Fence>) -> Result<u32, vkraw::VkResult> {
+	
+		let mut image_index = 0;
+		assert!(self.device.instance.vk.AcquireNextImageKHR.is_some());
+		let mut res = self.device.instance.vk.AcquireNextImageKHR.unwrap()(self.device.device, swapchain.swapchain, timeout, if semaphore.is_some() { semaphore.unwrap().semaphore } else { vkraw::VK_NULL_HANDLE }, if fence.is_some() { fence.unwrap().fence } else { vkraw::VK_NULL_HANDLE }, &mut image_index);
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(image_index)
+		} else {
+			Err(res)
 		}
 	}
 }
@@ -1470,6 +1547,18 @@ impl<'a> Mem<'a> {
 		self.ptr = data as u64;
 		MappedMem { mem: self, ptr: &self.ptr, _phantom: std::marker::PhantomData }
 	}
+	pub fn map_raw(&mut self, size: usize) -> RawMappedMem {
+
+		let mut data: *mut libc::c_void = ptr::null_mut();
+		let res;
+		unsafe {
+			res = vkraw::vkMapMemory(self.memory_allocator.device.device, self.mem, 0, size as u64, 0, &mut data);
+			assert!(res == vkraw::VkResult::VK_SUCCESS);
+			assert!(data != ptr::null_mut());
+		}
+		self.ptr = data as u64;
+		RawMappedMem { mem: self, ptr: &self.ptr }
+	}
 }
 impl<'a> Drop for Mem<'a> {
 	fn drop(&mut self) {
@@ -1479,7 +1568,6 @@ impl<'a> Drop for Mem<'a> {
 	}
 }
 
-// MappedMem should live a shorter lifetime than Mem
 pub struct MappedMem<'a, T> {
 	mem: &'a Mem<'a>,
 	ptr: &'a u64,
@@ -1502,6 +1590,23 @@ impl<'a, T> MappedMem<'a, T> {
 	}
 }
 impl<'a, T> Drop for MappedMem<'a, T> {
+	fn drop(&mut self) {
+		unsafe {
+			vkraw::vkUnmapMemory(self.mem.memory_allocator.device.device, self.mem.mem);
+		}
+	}
+}
+
+pub struct RawMappedMem<'a> {
+	mem: &'a Mem<'a>,
+	ptr: &'a u64
+}
+impl<'a> RawMappedMem<'a> {
+	pub fn get_ptr(&mut self) -> *mut u8 {
+		unsafe { std::mem::transmute::<u64, *mut u8>(*self.ptr) }
+	}
+}
+impl<'a> Drop for RawMappedMem<'a> {
 	fn drop(&mut self) {
 		unsafe {
 			vkraw::vkUnmapMemory(self.mem.memory_allocator.device.device, self.mem.mem);
@@ -2104,6 +2209,59 @@ impl<'a> PipelineBuilder<'a> {
 	}
 }
 
+pub struct ComputePipelineBuilder<'a> {
+	pub device: &'a Device<'a>,
+	pub layout: &'a PipelineLayout<'a>,
+	pub shader_stage: ShaderStage<'a>
+}
+
+impl<'a> ComputePipelineBuilder<'a> {
+	pub fn new(device: &'a Device<'a>, layout: &'a PipelineLayout<'a>, compute_shader: ShaderModule<'a>) -> Self {
+		ComputePipelineBuilder {
+			device: device,
+			layout: layout,
+			shader_stage: ShaderStage {
+				module: compute_shader,
+				entry_point: "main".to_string(),
+				stage: vkraw::VkShaderStageFlagBits::VK_SHADER_STAGE_COMPUTE_BIT
+			}
+		}
+	}
+	pub fn create(&self) -> Result<ComputePipeline<'a>, vkraw::VkResult> {
+
+		let entry_point_cstring: CString = std::ffi::CString::new(self.shader_stage.entry_point.clone()).unwrap();
+		let module: vkraw::VkPipelineShaderStageCreateInfo = vkraw::VkPipelineShaderStageCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: 0,
+			stage: self.shader_stage.stage,
+			module: self.shader_stage.module.module,
+			pName: entry_point_cstring.as_ptr() as *const u8,
+			pSpecializationInfo: ptr::null()
+		};
+
+		let pipeline_create_info = vkraw::VkComputePipelineCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: vkraw::VkPipelineCreateFlags::_EMPTY,
+			stage: module,
+			layout: self.layout.pipeline_layout,
+			basePipelineHandle: vkraw::VK_NULL_HANDLE,
+			basePipelineIndex: 0 as i32
+		};
+		let mut pipeline: vkraw::VkPipeline = 0;
+		let res;
+		unsafe {
+			res = vkraw::vkCreateComputePipelines(self.device.device, vkraw::VK_NULL_HANDLE, 1, &pipeline_create_info, ptr::null(), &mut pipeline);
+		}
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(ComputePipeline { device: &self.device, pipeline: pipeline })
+		} else {
+			Err(res)
+		}
+	}
+}
+
 impl<'a> Drop for Pipeline<'a> {
 	fn drop(&mut self) {
 		assert!(self.device.device != vkraw::VK_NULL_HANDLE);
@@ -2175,6 +2333,23 @@ impl<'a> DescriptorSet<'a> {
 			descriptorType: dtype,
 			pImageInfo: ptr::null(),
 			pBufferInfo: &buffer_info,
+			pTexelBufferView: ptr::null()
+		};
+		unsafe {
+			vkraw::vkUpdateDescriptorSets(self.descriptor_pool.device.device, 1, &write_ds, 0, ptr::null());
+		}
+	}
+	pub fn update_as_image(&self, image_info: vkraw::VkDescriptorImageInfo, binding: usize, array_element: usize, dtype: vkraw::VkDescriptorType) {
+		let write_ds = vkraw::VkWriteDescriptorSet {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			pNext: ptr::null(),
+			dstSet: self.descriptor_set,
+			dstBinding: binding as u32,
+			dstArrayElement: array_element as u32,
+			descriptorCount: 1,
+			descriptorType: dtype,
+			pImageInfo: &image_info,
+			pBufferInfo: ptr::null(),
 			pTexelBufferView: ptr::null()
 		};
 		unsafe {
@@ -2261,6 +2436,12 @@ impl<'a> CommandBuffer<'a> {
 		self
 	}
 	pub fn bind_pipeline<'y>(&'y mut self, bind_point: vkraw::VkPipelineBindPoint, pipeline: &'y Pipeline<'y>) -> &'y mut Self {
+		unsafe {
+			vkraw::vkCmdBindPipeline(self.command_buffer, bind_point, pipeline.pipeline);
+		}
+		self
+	}
+	pub fn bind_compute_pipeline<'y>(&'y mut self, bind_point: vkraw::VkPipelineBindPoint, pipeline: &'y ComputePipeline<'y>) -> &'y mut Self {
 		unsafe {
 			vkraw::vkCmdBindPipeline(self.command_buffer, bind_point, pipeline.pipeline);
 		}
