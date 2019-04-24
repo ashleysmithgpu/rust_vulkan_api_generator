@@ -128,6 +128,11 @@ pub struct DescriptorSet<'a> {
 	pub set_layouts: &'a DescriptorSetLayout<'a>
 }
 
+pub struct Sampler<'a> {
+	pub sampler: vkraw::VkSampler,
+	pub device: &'a Device<'a>,
+}
+
 pub enum ClearValue {
 	Colourf32([f32; 4]),
 	Colouri32([i32; 4]),
@@ -424,6 +429,9 @@ impl Instance {
 		let handle;
 		let mut surface: vkraw::VkSurfaceKHR = 0;
 		unsafe {
+
+			winapi::um::shellscalingapi::SetProcessDpiAwareness(winapi::um::shellscalingapi::PROCESS_SYSTEM_DPI_AWARE);
+		
 			let name = win32_string("windoze");
 			println!("Creating WIN32 window");
 			hinstance = winapi::um::libloaderapi::GetModuleHandleW(std::ptr::null_mut());
@@ -830,6 +838,63 @@ impl<'a> DeviceBuilder<'a> {
 				pQueuePriorities: queue_priorities.last().unwrap().as_ptr() as *const f32
 			});
 		}
+		let features = vkraw::VkPhysicalDeviceFeatures {
+			robustBufferAccess: 0,
+			fullDrawIndexUint32: 0,
+			imageCubeArray: 0,
+			independentBlend: 0,
+			geometryShader: 0,
+			tessellationShader: 0,
+			sampleRateShading: 0,
+			dualSrcBlend: 0,
+			logicOp: 0,
+			multiDrawIndirect: 0,
+			drawIndirectFirstInstance: 0,
+			depthClamp: 0,
+			depthBiasClamp: 0,
+			fillModeNonSolid: 0,
+			depthBounds: 0,
+			wideLines: 0,
+			largePoints: 0,
+			alphaToOne: 0,
+			multiViewport: 0,
+			samplerAnisotropy: 0,
+			textureCompressionETC2: 0,
+			textureCompressionASTC_LDR: 0,
+			textureCompressionBC: 0,
+			occlusionQueryPrecise: 0,
+			pipelineStatisticsQuery: 0,
+			vertexPipelineStoresAndAtomics: 0,
+			fragmentStoresAndAtomics: 0,
+			shaderTessellationAndGeometryPointSize: 0,
+			shaderImageGatherExtended: 0,
+			shaderStorageImageExtendedFormats: 1,
+			shaderStorageImageMultisample: 0,
+			shaderStorageImageReadWithoutFormat: 0,
+			shaderStorageImageWriteWithoutFormat: 0,
+			shaderUniformBufferArrayDynamicIndexing: 0,
+			shaderSampledImageArrayDynamicIndexing: 0,
+			shaderStorageBufferArrayDynamicIndexing: 0,
+			shaderStorageImageArrayDynamicIndexing: 0,
+			shaderClipDistance: 0,
+			shaderCullDistance: 0,
+			shaderFloat64: 0,
+			shaderInt64: 0,
+			shaderInt16: 0,
+			shaderResourceResidency: 0,
+			shaderResourceMinLod: 0,
+			sparseBinding: 0,
+			sparseResidencyBuffer: 0,
+			sparseResidencyImage2D: 0,
+			sparseResidencyImage3D: 0,
+			sparseResidency2Samples: 0,
+			sparseResidency4Samples: 0,
+			sparseResidency8Samples: 0,
+			sparseResidency16Samples: 0,
+			sparseResidencyAliased: 0,
+			variableMultisampleRate: 0,
+			inheritedQueries: 0,
+		};
 		let device_create_info = vkraw::VkDeviceCreateInfo {
 			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
 			pNext: ptr::null(),
@@ -840,7 +905,7 @@ impl<'a> DeviceBuilder<'a> {
 			ppEnabledLayerNames: enabled_layers.as_ptr(),
 			enabledExtensionCount: enabled_extensions.len() as u32,
 			ppEnabledExtensionNames: enabled_extensions.as_ptr(),
-			pEnabledFeatures: ptr::null()
+			pEnabledFeatures: &features
 		};
 
 		println!("vkCreateDevice");
@@ -1079,6 +1144,41 @@ impl<'a> Device<'a> {
 			Err(res)
 		}
 	}
+
+	pub fn create_sampler(&self) -> Result<Sampler, vkraw::VkResult> {
+
+		// TODO
+		let mut sampler: vkraw::VkSampler = 0;
+		let sampler_create_info = vkraw::VkSamplerCreateInfo {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+			pNext: ptr::null(),
+			flags: vkraw::VkSamplerCreateFlags::_EMPTY,
+			magFilter: vkraw::VkFilter::VK_FILTER_NEAREST,
+			minFilter: vkraw::VkFilter::VK_FILTER_NEAREST,
+			mipmapMode: vkraw::VkSamplerMipmapMode::VK_SAMPLER_MIPMAP_MODE_NEAREST,
+			addressModeU: vkraw::VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+			addressModeV: vkraw::VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+			addressModeW: vkraw::VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+			mipLodBias: 0.0,
+			anisotropyEnable: false as u32,
+			maxAnisotropy: 0.0,
+			compareEnable: false as u32,
+			compareOp: vkraw::VkCompareOp::VK_COMPARE_OP_NEVER,
+			minLod: 0.0,
+			maxLod: 0.0,
+			borderColor: vkraw::VkBorderColor::VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK,
+			unnormalizedCoordinates: false as u32
+		};
+		let res;
+		unsafe {
+			res = vkraw::vkCreateSampler(self.device, &sampler_create_info, ptr::null(), &mut sampler);
+		}
+		if res == vkraw::VkResult::VK_SUCCESS {
+			Ok(Sampler { device: &self, sampler: sampler })
+		} else {
+			Err(res)
+		}
+	}
 	
 	pub fn wait_idle(&self) {
 		unsafe {
@@ -1161,7 +1261,8 @@ pub struct ImageBuilder<'a> {
 	pub array_layers: usize,
 	pub samples: vkraw::VkSampleCountFlagBits,
 	pub tiling: vkraw::VkImageTiling,
-	pub usage: vkraw::VkImageUsageFlags
+	pub usage: vkraw::VkImageUsageFlags,
+	pub initial_layout: vkraw::VkImageLayout
 }
 
 impl<'a> ImageBuilder<'a> {
@@ -1175,7 +1276,8 @@ impl<'a> ImageBuilder<'a> {
 			array_layers: 1,
 			samples: vkraw::VkSampleCountFlagBits::VK_SAMPLE_COUNT_1_BIT,
 			tiling: vkraw::VkImageTiling::VK_IMAGE_TILING_OPTIMAL,
-			usage: vkraw::VkImageUsageFlags::VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+			usage: vkraw::VkImageUsageFlags::VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+			initial_layout: vkraw::VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED
 		}
 	}
 	pub fn create(&self) -> Result<Image<'a>, vkraw::VkResult> {
@@ -1194,7 +1296,7 @@ impl<'a> ImageBuilder<'a> {
 			sharingMode: vkraw::VkSharingMode::VK_SHARING_MODE_EXCLUSIVE,
 			queueFamilyIndexCount: 0,
 			pQueueFamilyIndices: ptr::null(),
-			initialLayout: vkraw::VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED
+			initialLayout: self.initial_layout
 		};
 		let res;
 		let mut image: vkraw::VkImage;
@@ -1457,17 +1559,21 @@ impl<'a> MemoryAllocator<'a> {
 			device: device
 		}
 	}
-	pub fn allocate_buffer_memory(&self, buffer: &Buffer, memory_type_index: usize) -> Result<Mem, vkraw::VkResult> {
+	pub fn get_buffer_memory_size_req(&self, buffer: &Buffer, memory_type_index: usize) -> u64 {
 
 		let mut mem_reqs: vkraw::VkMemoryRequirements;
 		unsafe {
 			mem_reqs = std::mem::uninitialized();
 			vkraw::vkGetBufferMemoryRequirements(self.device.device, buffer.buffer, &mut mem_reqs);
 		}
+		mem_reqs.size
+	}
+	pub fn allocate_buffer_memory(&self, buffer: &Buffer, memory_type_index: usize) -> Result<Mem, vkraw::VkResult> {
+
 		let mem_alloc = vkraw::VkMemoryAllocateInfo {
 			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
 			pNext: ptr::null(),
-			allocationSize: mem_reqs.size,
+			allocationSize: self.get_buffer_memory_size_req(buffer, memory_type_index),
 			memoryTypeIndex: memory_type_index as u32
 		};
 		let mut memory: vkraw::VkDeviceMemory = 0;
@@ -1491,17 +1597,21 @@ impl<'a> MemoryAllocator<'a> {
 			Err(res)
 		}
 	}
-	pub fn allocate_image_memory(&self, image: &Image, memory_type_index: usize) -> Result<Mem, vkraw::VkResult> {
+	pub fn get_image_memory_size_req(&self, image: &Image, memory_type_index: usize) -> u64 {
 
 		let mut mem_reqs: vkraw::VkMemoryRequirements;
 		unsafe {
 			mem_reqs = std::mem::uninitialized();
 			vkraw::vkGetImageMemoryRequirements(self.device.device, image.image, &mut mem_reqs);
 		}
+		mem_reqs.size
+	}
+	pub fn allocate_image_memory(&self, image: &Image, memory_type_index: usize) -> Result<Mem, vkraw::VkResult> {
+
 		let mem_alloc = vkraw::VkMemoryAllocateInfo {
 			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
 			pNext: ptr::null(),
-			allocationSize: mem_reqs.size,
+			allocationSize: self.get_image_memory_size_req(image, memory_type_index),
 			memoryTypeIndex: memory_type_index as u32
 		};
 		let mut memory: vkraw::VkDeviceMemory = 0;
@@ -1964,11 +2074,11 @@ pub struct PipelineBuilder<'a> {
 	pub dynamic: Option<vkraw::VkPipelineDynamicStateCreateInfo>,
 	pub subpass: usize,
 	
-	vertex_attributes: Vec<vkraw::VkVertexInputAttributeDescription>,
-	vertex_bindings: Vec<vkraw::VkVertexInputBindingDescription>,
-	scissors: Vec<vkraw::VkRect2D>,
-	viewports: Vec<vkraw::VkViewport>,
-	blend_attachments: Vec<vkraw::VkPipelineColorBlendAttachmentState>
+	pub vertex_attributes: Vec<vkraw::VkVertexInputAttributeDescription>,
+	pub vertex_bindings: Vec<vkraw::VkVertexInputBindingDescription>,
+	pub scissors: Vec<vkraw::VkRect2D>,
+	pub viewports: Vec<vkraw::VkViewport>,
+	pub blend_attachments: Vec<vkraw::VkPipelineColorBlendAttachmentState>
 }
 
 impl<'a> PipelineBuilder<'a> {
@@ -2262,6 +2372,16 @@ impl<'a> ComputePipelineBuilder<'a> {
 	}
 }
 
+impl<'a> Drop for Sampler<'a> {
+	fn drop(&mut self) {
+		assert!(self.device.device != vkraw::VK_NULL_HANDLE);
+		unsafe {
+			println!("vkDestroySampler");
+			vkraw::vkDestroySampler(self.device.device, self.sampler, ptr::null());
+		}
+	}
+}
+
 impl<'a> Drop for Pipeline<'a> {
 	fn drop(&mut self) {
 		assert!(self.device.device != vkraw::VK_NULL_HANDLE);
@@ -2475,9 +2595,29 @@ impl<'a> CommandBuffer<'a> {
 		}
 		self
 	}
+	pub fn pipeline_barrier<'y>(&'y mut self, src_stage_mask: vkraw::VkPipelineStageFlagBits, dst_stage_mask: vkraw::VkPipelineStageFlagBits, dependency_flags: vkraw::VkDependencyFlagBits, memory_barriers: Vec<vkraw::VkMemoryBarrier>, buffer_memory_barriers: Vec<vkraw::VkBufferMemoryBarrier>, image_memory_barriers: Vec<vkraw::VkImageMemoryBarrier>) -> &'y mut Self {
+
+		unsafe {
+			vkraw::vkCmdPipelineBarrier(self.command_buffer, src_stage_mask, dst_stage_mask, dependency_flags, memory_barriers.len() as u32, memory_barriers.as_ptr(), buffer_memory_barriers.len() as u32, buffer_memory_barriers.as_ptr(), image_memory_barriers.len() as u32, image_memory_barriers.as_ptr());
+		}
+		self
+	}
+	pub fn copy_buffer_to_image<'y>(&'y mut self, src_buffer: &'y Buffer<'y>, dst_image: &'y Image<'y>, dst_image_layout: vkraw::VkImageLayout, regions: Vec<vkraw::VkBufferImageCopy>) -> &'y mut Self {
+	
+		unsafe {
+			vkraw::vkCmdCopyBufferToImage(self.command_buffer, src_buffer.buffer, dst_image.image, dst_image_layout, regions.len() as u32, regions.as_ptr());
+		}
+		self
+	}
 	pub fn end_command_buffer<'y>(&'y mut self) -> &'y mut Self {
 		unsafe {
 			vkraw::vkEndCommandBuffer(self.command_buffer);
+		}
+		self
+	}
+	pub fn dispatch<'y>(&'y mut self, x: u32, y: u32, z: u32) -> &'y mut Self {
+		unsafe {
+			vkraw::vkCmdDispatch(self.command_buffer, x, y, z);
 		}
 		self
 	}
@@ -2507,3 +2647,6 @@ impl<'a> Fence<'a> {
 		}
 	}
 }
+
+
+include!("ktx.rs");

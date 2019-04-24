@@ -9,6 +9,9 @@ use std::ptr;
 fn main() {
 
 	let args: Vec<String> = std::env::args().collect();
+	
+	let mut hdr = args.iter().find(|&x| x == "hdr").is_some();
+	let mut fullscreen = args.iter().find(|&x| x == "fullscreen").is_some();
 
 	let instance = vk::InstanceBuilder {
 		application_name: "hello triangle".to_string(),
@@ -16,19 +19,14 @@ fn main() {
 		.. Default::default()
 	}.create_instance().expect("Couldn't create instance");
 
-	let width = 800;
-	let height = 600;
+	let mut width = 2560;
+	let mut height = 1440;
 
-	let wsi_info = instance.create_wsi(width, height);
-
-	#[cfg(feature = "xcb")]
-	let protocols;
-	let wm_delete_window;
-	let wm_protocols;
+	let wsi_info = instance.create_wsi(width, height, fullscreen);
 
 	#[cfg(feature = "xcb")]
-	{
-		let (wm_protocols2, wm_delete_window2) = {
+	let (protocols, wm_delete_window, wm_protocols) = {
+		let (wm_protocols, wm_delete_window) = {
 			let pc = xcb::intern_atom(&wsi_info.1, false, "WM_PROTOCOLS");
 			let dwc = xcb::intern_atom(&wsi_info.1, false, "WM_DELETE_WINDOW");
 
@@ -42,39 +40,41 @@ fn main() {
 			};
 			(p, dw)
 		};
-		protocols = [wm_delete_window2];
-		wm_delete_window = wm_delete_window2;
-		wm_protocols = wm_protocols2;
 
 		xcb::change_property(&wsi_info.1, xcb::PROP_MODE_REPLACE as u8, wsi_info.2, wm_protocols, xcb::ATOM_ATOM, 32, &protocols);
-	}
+		
+		([wm_delete_window], wm_delete_window, wm_protocols)
+	};
+	
+	let device: vk::Device;
 
-	let physical_device;
-	let graphics_queue;
-	let compute_queue;
-	let transfer_queue;
-	let device = {
+	let (physical_device, graphics_queue, compute_queue, transfer_queue) = {
 		let mut db = vk::DeviceBuilder::new(&instance);
-		let device = db/*.use_device_named("Vega".to_string())*/.default_queues_physical_device(&wsi_info.0).create_device().expect("Couldn't create logical device");
+		device = db/*.use_device_named("Vega".to_string())*/.default_queues_physical_device(&wsi_info.0).create_device().expect("Couldn't create logical device");
 
-		let (physical_device2, physical_device_index) = db.physical_device.unwrap();
-		physical_device = physical_device2;
+		let (physical_device, physical_device_index) = db.physical_device.unwrap();
 
 		println!("Using device index {:?}, graphics, compute, transfer queue family inices: {}, {}, {}",
 			physical_device_index, db.queue_create_infos[0].0, db.queue_create_infos[0].0, db.queue_create_infos[0].0);
 
-		graphics_queue = device.get_queue(db.queue_create_infos[0].0, 0);
-		compute_queue = device.get_queue(db.queue_create_infos[0].0, 0);
-		transfer_queue = device.get_queue(db.queue_create_infos[0].0, 0);
-		device
+		let graphics_queue = device.get_queue(db.queue_create_infos[0].0, 0).unwrap();
+		let compute_queue = device.get_queue(db.queue_create_infos[0].0, 0).unwrap();
+		let transfer_queue = device.get_queue(db.queue_create_infos[0].0, 0).unwrap();
+		
+		(physical_device, graphics_queue, compute_queue, transfer_queue)
 	};
+	
+	let caps = physical_device.surface_capabilities(&wsi_info.0).unwrap();
+	width = std::cmp::max(width, caps.minImageExtent.width);
+	height = std::cmp::max(height, caps.minImageExtent.height);
+	width = std::cmp::min(width, caps.maxImageExtent.width);
+	height = std::cmp::min(height, caps.maxImageExtent.height);
+	
+	println!("Capping window size to {}x{}", width, height);
 
 	let heaps = physical_device.memory_properties();
 	let mem = vk::MemoryAllocator::new(&device);
-	
-	let mut hdr = args.iter().find(|&x| x == "hdr").is_some();
 
-	let caps = physical_device.surface_capabilities(&wsi_info.0).unwrap();
 	let modes = physical_device.present_modes(&wsi_info.0).unwrap();
 	
 	let present_complete_sem = device.create_semaphore().unwrap();
@@ -201,13 +201,13 @@ fn main() {
 	let mut swapchain = None;
 
 	'swapchain_setup: while !quit {
+
+		let formats = physical_device.supported_surface_formats2(hdr, &wsi_info).unwrap();
 		
 		let format;
 		let colour_space;
 
-		let formats = physical_device.supported_surface_formats2(hdr, &wsi_info).unwrap();
-
-		if hdr {
+		if hdr && formats.iter().find(|&x| x.surfaceFormat.format == vkraw::VkFormat::VK_FORMAT_A2R10G10B10_UNORM_PACK32).is_some() {
 			format = vkraw::VkFormat::VK_FORMAT_A2R10G10B10_UNORM_PACK32;
 			colour_space = vkraw::VkColorSpaceKHR::VK_COLOR_SPACE_BT2020_LINEAR_EXT;
 		} else {
@@ -380,19 +380,28 @@ fn main() {
 			}
 
 			if recreate_swapchain {
-
 				println!("Recreating swapchain");
 				break; // Out of render loop and re-create swapchain
 			}
 
-			assert!(instance.vk.AcquireNextImageKHR.is_some());
 			let mut current_buffer = 0;
-			let mut res = instance.vk.AcquireNextImageKHR.unwrap()(device.device, swapchain.swapchain, std::u64::MAX, present_complete_sem.semaphore, vkraw::VK_NULL_HANDLE, &mut current_buffer);
-			if res != vkraw::VkResult::VK_SUCCESS {
-				println!("Acquire returned {:?}, breaking", res);
-				break;
+			let res = graphics_queue.acquire(&swapchain, std::u64::MAX, Some(&present_complete_sem), None);
+			match res {
+				Ok(image_index) => current_buffer = image_index,
+				Err(res) => {
+					if res == vkraw::VkResult::VK_ERROR_OUT_OF_DATE_KHR {
+						recreate_swapchain = true;
+					} else {
+						println!("present err {:?}", res);
+						quit = true;
+					}
+				}
 			}
-			assert!(res == vkraw::VkResult::VK_SUCCESS);
+
+			if recreate_swapchain {
+				println!("Recreating swapchain");
+				break; // Out of render loop and re-create swapchain
+			}
 
 			if frame_index > 1 {
 				fences[current_buffer as usize].wait(std::u64::MAX).unwrap()
@@ -405,7 +414,6 @@ fn main() {
 				}
 				let elapsed = rotation_start.elapsed();
 				let rotation = elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1_000_000_000.0;
-				println!("{}", rotation);
 				let rotation = cgmath::Matrix3::from_angle_z(cgmath::Rad(rotation as f32));
 
 				let aspect_ratio = width as f32 / height as f32;
@@ -431,7 +439,7 @@ fn main() {
 				.begin_render_pass(width, height, &render_pass, vec![
 					vk::ClearValue::Colourf32([0.0, 0.0, 0.0, 0.0]),
 					vk::ClearValue::DepthStencil{ depth: 1.0, stencil: 0 }], Some(&framebuffers[current_buffer as usize]))
-				.bind_descriptor_sets(vkraw::VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, &pipeline_layout, 0, vec![&descriptor_sets[(current_buffer % 2) as usize]], vec![])
+				.bind_descriptor_sets(vkraw::VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, &pipeline_layout, 0, vec![&descriptor_sets[current_buffer as usize]], vec![])
 				.bind_pipeline(vkraw::VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, &pipeline)
 				.bind_vertex_buffers(0, vec![(&vertex_buffer, 0)])
 				.bind_index_buffer(&index_buffer, 0, vkraw::VkIndexType::VK_INDEX_TYPE_UINT32)
@@ -439,39 +447,38 @@ fn main() {
 				.end_render_pass()
 				.end_command_buffer();
 
-			let wait_stage_mask = vkraw::VkPipelineStageFlags::VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-			let submit_info = vkraw::VkSubmitInfo {
-				sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_SUBMIT_INFO,
-				pNext: ptr::null(),
-				waitSemaphoreCount: 1,
-				pWaitSemaphores: &present_complete_sem.semaphore,
-				pWaitDstStageMask: &wait_stage_mask,
-				commandBufferCount: 1,
-				pCommandBuffers: &command_buffers[current_buffer as usize].command_buffer,
-				signalSemaphoreCount: 1,
-				pSignalSemaphores: &render_complete_sem.semaphore
-			};
+			graphics_queue.submit(vec![&command_buffers[current_buffer as usize]], Some(&fences[current_buffer as usize]),
+				vec![(&present_complete_sem, vkraw::VkPipelineStageFlags::VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT)], 
+				vec![&render_complete_sem]);
 
-			unsafe {
-				vkraw::vkQueueSubmit(graphics_queue, 1, &submit_info, fences[current_buffer as usize].fence);
+			let res = graphics_queue.present(vec![(&render_complete_sem, &swapchain, current_buffer)]);
+			match res {
+				Ok(ress) => {
+					for res2 in ress {
+						if res2 == vkraw::VkResult::VK_ERROR_OUT_OF_DATE_KHR {
+							recreate_swapchain = true;
+						} else {
+							println!("present err {:?}", res2);
+							quit = true;
+						}
+					}
+				},
+				Err(res) => {
+					if res == vkraw::VkResult::VK_ERROR_OUT_OF_DATE_KHR {
+						recreate_swapchain = true;
+					} else {
+						println!("present err {:?}", res);
+						quit = true;
+					}
+				}
 			}
 
-			let mut result = vkraw::VkResult::VK_SUCCESS;
-			let mut image_indices = current_buffer;
-			let present_info = vkraw::VkPresentInfoKHR {
-				sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-				pNext: ptr::null(),
-				waitSemaphoreCount: 1,
-				pWaitSemaphores: &render_complete_sem.semaphore,
-				swapchainCount: 1,
-				pSwapchains: &swapchain.swapchain,
-				pImageIndices: &mut image_indices,
-				pResults: &mut result
-			};
-			assert!(instance.vk.QueuePresentKHR.is_some());
-			instance.vk.QueuePresentKHR.unwrap()(graphics_queue, &present_info);
+			if recreate_swapchain {
+				println!("Recreating swapchain");
+				break; // Out of render loop and re-create swapchain
+			}
+
 			frame_index += 1;
-			println!("frame {} {}", frame_index, rotate);
 		}
 		device.wait_idle();
 	}
