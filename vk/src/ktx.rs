@@ -1050,22 +1050,18 @@ pub fn ktx_pad_unpack_align_len(nbytes: usize) -> usize {
 impl KtxFaceData {
 	pub fn deserialize<Endianness: byteorder::ByteOrder, R: std::io::Read + std::io::Seek>(header: &KtxHeader, source: &mut R, data: &mut Vec<u8>, size_in_bytes: usize) -> Result<KtxFaceData, io::Error>
     {
-		let mut ret_val = KtxFaceData {
+		let ret_val = KtxFaceData {
 			data: Vec::<u8>::new()//with_capacity(size_in_bytes / std::mem::size_of::<i32>())
 		};
-		
-		// "Replace with 1 if this field is 0."
-		let pixel_depth = std::cmp::max(header.pixel_depth, 1);
-		let pixel_height = std::cmp::max(header.pixel_height, 1);
 
 		/*for byte in 0..size_in_bytes / std::mem::size_of::<i32>() {
 			ret_val.data.push(source.read_u32::<Endianness>()?);
 		}*/
-		for byte in 0..size_in_bytes {
+		for _byte in 0..size_in_bytes {
 			data.push(source.read_u8()?);
 		}
 
-		let mut current_offset = 0;
+		let current_offset = size_in_bytes as i64;
 
 		// 2.17 "For non-array cubemap textures (any texture where numberOfFaces is 6 and numberOfArrayElements is 0) cubePadding contains between 0 and 3 bytes of value 0x00 to ensure that the data in each face begins at a file offset that is a multiple of 4. In all other cases cubePadding is empty (0 bytes long)."
 		let has_cube_padding = header.number_of_faces == 6 && header.number_of_array_elements == 0;
@@ -1086,7 +1082,7 @@ impl KtxArrayElement {
 			faces: Vec::<KtxFaceData>::new()
 		};
 
-		for face in 0..header.number_of_faces {
+		for _face in 0..header.number_of_faces {
 			ret_val.faces.push(KtxFaceData::deserialize::<Endianness, R>(header, source, data, size_in_bytes)?);
 		}
 
@@ -1107,7 +1103,7 @@ impl KtxMipmapLevel {
 		// "Replace with 1 if this field is 0."
 		let number_of_array_elements = std::cmp::max(header.number_of_array_elements, 1);
 		
-		for array_element in 0..number_of_array_elements {
+		for _array_element in 0..number_of_array_elements {
 			ret_val.array_elements.push(KtxArrayElement::deserialize::<Endianness, R>(header, source, &mut ret_val.data, size_in_bytes)?);
 		}
 		

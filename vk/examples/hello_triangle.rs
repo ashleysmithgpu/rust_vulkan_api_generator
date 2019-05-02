@@ -404,7 +404,7 @@ fn main() {
 			}
 
 			if frame_index > 1 {
-				fences[current_buffer as usize].wait(std::u64::MAX).unwrap()
+				fences[current_buffer as usize].wait(None).unwrap()
 					.reset().unwrap();
 			}
 

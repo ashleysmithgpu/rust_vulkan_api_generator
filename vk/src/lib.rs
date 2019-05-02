@@ -496,9 +496,7 @@ impl Instance {
 				winapi::um::winuser::SetWindowLongPtrA(handle, winapi::um::winuser::GWL_EXSTYLE, exstyle & (!(winapi::um::winuser::WS_EX_DLGMODALFRAME | winapi::um::winuser::WS_EX_WINDOWEDGE | winapi::um::winuser::WS_EX_CLIENTEDGE | winapi::um::winuser::WS_EX_STATICEDGE) as isize));
 				
 				let mut monitor_info: winapi::um::winuser::MONITORINFO;
-				unsafe {
-					monitor_info = std::mem::uninitialized();
-				}
+				monitor_info = std::mem::uninitialized();
 				monitor_info.cbSize = std::mem::size_of::<winapi::um::winuser::MONITORINFO>() as u32;
 				winapi::um::winuser::GetMonitorInfoA(winapi::um::winuser::MonitorFromWindow(handle, winapi::um::winuser::MONITOR_DEFAULTTONEAREST), &mut monitor_info);
 				winapi::um::winuser::SetWindowPos(handle, ptr::null_mut(), monitor_info.rcMonitor.left, monitor_info.rcMonitor.top, 
@@ -714,6 +712,7 @@ impl<'a> DeviceBuilder<'a> {
 				"VK_KHR_swapchain".to_string(),
 				//"VK_EXT_full_screen_exclusive".to_string(),
 				//"VK_AMD_display_native_hdr".to_string(),
+				"VK_KHR_shader_float16_int8".to_string(),
 			],
 			queue_create_infos: vec![(0, vec![1.0])],
 			want_device_name: String::new(),
@@ -895,9 +894,16 @@ impl<'a> DeviceBuilder<'a> {
 			variableMultisampleRate: 0,
 			inheritedQueries: 0,
 		};
+		let extra_features = vkraw::VkPhysicalDeviceFloat16Int8FeaturesKHR {
+			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT16_INT8_FEATURES_KHR,
+			pNext: ptr::null_mut(),
+			shaderFloat16: 1,
+			shaderInt8: 1
+		};
+		
 		let device_create_info = vkraw::VkDeviceCreateInfo {
 			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-			pNext: ptr::null(),
+			pNext: if true { unsafe { mem::transmute(&extra_features) } } else { ptr::null_mut() },
 			flags: 0,
 			queueCreateInfoCount: queue_create_infos.len() as u32,
 			pQueueCreateInfos: queue_create_infos.as_ptr(),
@@ -1185,6 +1191,126 @@ impl<'a> Device<'a> {
 			vkraw::vkDeviceWaitIdle(self.device);
 		}
 	}
+
+	/*pub fn load_ktx_texture_to_gpu<'y>(&'a self, mem: &'y mut MemoryAllocator<'a>, filename: String, staging_memory_index: usize, gpu_only_memory_index: usize, queue: &Queue, command_pool: &CommandPool) -> Option<(Image<'a>, ImageView<'a>, Mem<'y>, KtxFile)> {
+
+		let mut f = std::fs::File::open(&filename).unwrap();
+		let ktx_file = KtxFile::deserialize(&mut f).unwrap();
+		println!("ktx file\n{:?}", ktx_file);
+
+		let input_size = (ktx_file.header.pixel_width, ktx_file.header.pixel_height);
+		println!("{}x{}", input_size.0, input_size.1);
+		let img_size = ktx_file.header.image_size_max();
+
+		println!("Creating memory");
+		let staging_buffer = self.create_buffer(img_size, vkraw::VkBufferUsageFlags::VK_BUFFER_USAGE_TRANSFER_SRC_BIT).unwrap();
+		let staging_buffer_size = mem.get_buffer_memory_size_req(&staging_buffer);
+		let mut staging_buffer_mem = mem.allocate_buffer_memory(&staging_buffer, staging_memory_index).unwrap();
+		assert!(staging_buffer_size >= img_size as u64);
+
+		println!("Coyping {}", img_size);
+		{
+			let mut mapped = staging_buffer_mem.map_raw(img_size);
+			unsafe {
+				libc::memcpy(mapped.get_ptr() as *mut core::ffi::c_void, ktx_file.data.as_ref().unwrap()[0].data.as_ptr() as *mut libc::c_void, img_size as libc::size_t);
+			}
+		}
+
+		let mut buffer_copy_regions = Vec::<vkraw::VkBufferImageCopy>::new();
+		
+		//for mip in mips { // TODO
+		{
+			buffer_copy_regions.push(vkraw::VkBufferImageCopy {
+				bufferOffset: 0,
+				bufferRowLength: 0,
+				bufferImageHeight: 0,
+				imageSubresource: vkraw::VkImageSubresourceLayers {
+					aspectMask: vkraw::VkImageAspectFlags::VK_IMAGE_ASPECT_COLOR_BIT,
+					mipLevel: 0,
+					baseArrayLayer: 0,
+					layerCount: 1,
+				},
+				imageOffset: vkraw::VkOffset3D { x: 0, y: 0, z: 0 },
+				imageExtent: vkraw::VkExtent3D { width: input_size.0 as u32, height: input_size.1 as u32, depth: 1 },
+			});
+		}
+
+		println!("Creating GPU image");
+		let cs_input_image = {
+			let mut ib = ImageBuilder::new(&self);
+			ib.extent.width = input_size.0 as u32;
+			ib.extent.height = input_size.1 as u32;
+			ib.format = ktx_file.header.get_vk_format().unwrap();
+			ib.tiling = vkraw::VkImageTiling::VK_IMAGE_TILING_OPTIMAL;
+			ib.usage = vkraw::VkImageUsageFlags::VK_IMAGE_USAGE_TRANSFER_DST_BIT | vkraw::VkImageUsageFlags::VK_IMAGE_USAGE_STORAGE_BIT;
+			ib.create().unwrap()
+		};
+
+		let cs_image_mem = mem.allocate_image_memory(&cs_input_image, gpu_only_memory_index).unwrap();
+		//let cs_image_view = ImageViewBuilder::new(&cs_input_image, ktx_file.header.get_vk_format().unwrap()).create().unwrap();
+		let cs_image_view = ImageView {
+			image_view: 0,
+			image: &cs_input_image
+		};
+
+		{
+			println!("Creating cmdb");
+			let mut upload_cmdbs = command_pool.create_command_buffers(1).unwrap();
+			let upload_cmdb = &mut upload_cmdbs[0];
+			upload_cmdb
+				.begin().unwrap()
+				
+				.pipeline_barrier(vkraw::VkPipelineStageFlagBits::VK_PIPELINE_STAGE_HOST_BIT, vkraw::VkPipelineStageFlagBits::VK_PIPELINE_STAGE_TRANSFER_BIT, vkraw::VkDependencyFlagBits::_EMPTY,
+					vec![], vec![], vec![vkraw::VkImageMemoryBarrier {
+						sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+						pNext: ptr::null(),
+						srcAccessMask: vkraw::VkAccessFlags::_EMPTY,
+						dstAccessMask: vkraw::VkAccessFlags::VK_ACCESS_TRANSFER_WRITE_BIT,
+						oldLayout: vkraw::VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED,
+						newLayout: vkraw::VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+						srcQueueFamilyIndex: 0,
+						dstQueueFamilyIndex: 0,
+						image: cs_input_image.image,
+						subresourceRange: vkraw::VkImageSubresourceRange {
+							aspectMask: vkraw::VkImageAspectFlags::VK_IMAGE_ASPECT_COLOR_BIT,
+							baseMipLevel: 0,
+							levelCount: 1,
+							baseArrayLayer: 0,
+							layerCount: 1
+						}
+					}])
+				.copy_buffer_to_image(&staging_buffer, &cs_input_image, vkraw::VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, buffer_copy_regions)
+				.pipeline_barrier(vkraw::VkPipelineStageFlagBits::VK_PIPELINE_STAGE_TRANSFER_BIT, vkraw::VkPipelineStageFlagBits::VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, vkraw::VkDependencyFlagBits::_EMPTY,
+					vec![], vec![], vec![vkraw::VkImageMemoryBarrier {
+						sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+						pNext: ptr::null(),
+						srcAccessMask: vkraw::VkAccessFlags::VK_ACCESS_TRANSFER_WRITE_BIT,
+						dstAccessMask: vkraw::VkAccessFlags::VK_ACCESS_SHADER_READ_BIT,
+						oldLayout: vkraw::VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+						newLayout: vkraw::VkImageLayout::VK_IMAGE_LAYOUT_GENERAL,
+						srcQueueFamilyIndex: 0,
+						dstQueueFamilyIndex: 0,
+						image: cs_input_image.image,
+						subresourceRange: vkraw::VkImageSubresourceRange {
+							aspectMask: vkraw::VkImageAspectFlags::VK_IMAGE_ASPECT_COLOR_BIT,
+							baseMipLevel: 0,
+							levelCount: 1,
+							baseArrayLayer: 0,
+							layerCount: 1
+						}
+					}])
+				.end_command_buffer();
+
+			println!("Submitting cmdb");
+			let mut temp_fence = self.create_fence().unwrap();
+			queue.submit(vec![&upload_cmdb], Some(&temp_fence), vec![], vec![]);
+			println!("Waiting for results");
+			temp_fence.wait(None).unwrap();
+			println!("Done");
+		}
+		
+		Some((cs_input_image, cs_image_view, cs_image_mem, ktx_file))
+	}*/
 }
 
 impl<'a> Queue<'a> {
@@ -1195,7 +1321,6 @@ impl<'a> Queue<'a> {
 		let raw_signal_semaphores: Vec<vkraw::VkSemaphore> = signals.iter().map(|x| x.semaphore).collect();
 		let raw_cmdbs: Vec<vkraw::VkCommandBuffer> = command_buffers.iter().map(|x| x.command_buffer).collect();
 
-		let wait_stage_mask = vkraw::VkPipelineStageFlags::VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 		let submit_info = vkraw::VkSubmitInfo {
 			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_SUBMIT_INFO,
 			pNext: ptr::null(),
@@ -1243,7 +1368,7 @@ impl<'a> Queue<'a> {
 	
 		let mut image_index = 0;
 		assert!(self.device.instance.vk.AcquireNextImageKHR.is_some());
-		let mut res = self.device.instance.vk.AcquireNextImageKHR.unwrap()(self.device.device, swapchain.swapchain, timeout, if semaphore.is_some() { semaphore.unwrap().semaphore } else { vkraw::VK_NULL_HANDLE }, if fence.is_some() { fence.unwrap().fence } else { vkraw::VK_NULL_HANDLE }, &mut image_index);
+		let res = self.device.instance.vk.AcquireNextImageKHR.unwrap()(self.device.device, swapchain.swapchain, timeout, if semaphore.is_some() { semaphore.unwrap().semaphore } else { vkraw::VK_NULL_HANDLE }, if fence.is_some() { fence.unwrap().fence } else { vkraw::VK_NULL_HANDLE }, &mut image_index);
 		if res == vkraw::VkResult::VK_SUCCESS {
 			Ok(image_index)
 		} else {
@@ -1559,7 +1684,7 @@ impl<'a> MemoryAllocator<'a> {
 			device: device
 		}
 	}
-	pub fn get_buffer_memory_size_req(&self, buffer: &Buffer, memory_type_index: usize) -> u64 {
+	pub fn get_buffer_memory_size_req(&self, buffer: &Buffer) -> u64 {
 
 		let mut mem_reqs: vkraw::VkMemoryRequirements;
 		unsafe {
@@ -1573,7 +1698,7 @@ impl<'a> MemoryAllocator<'a> {
 		let mem_alloc = vkraw::VkMemoryAllocateInfo {
 			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
 			pNext: ptr::null(),
-			allocationSize: self.get_buffer_memory_size_req(buffer, memory_type_index),
+			allocationSize: self.get_buffer_memory_size_req(buffer),
 			memoryTypeIndex: memory_type_index as u32
 		};
 		let mut memory: vkraw::VkDeviceMemory = 0;
@@ -1597,7 +1722,7 @@ impl<'a> MemoryAllocator<'a> {
 			Err(res)
 		}
 	}
-	pub fn get_image_memory_size_req(&self, image: &Image, memory_type_index: usize) -> u64 {
+	pub fn get_image_memory_size_req(&self, image: &Image) -> u64 {
 
 		let mut mem_reqs: vkraw::VkMemoryRequirements;
 		unsafe {
@@ -1611,7 +1736,7 @@ impl<'a> MemoryAllocator<'a> {
 		let mem_alloc = vkraw::VkMemoryAllocateInfo {
 			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
 			pNext: ptr::null(),
-			allocationSize: self.get_image_memory_size_req(image, memory_type_index),
+			allocationSize: self.get_image_memory_size_req(image),
 			memoryTypeIndex: memory_type_index as u32
 		};
 		let mut memory: vkraw::VkDeviceMemory = 0;
@@ -2624,10 +2749,10 @@ impl<'a> CommandBuffer<'a> {
 }
 
 impl<'a> Fence<'a> {
-	pub fn wait<'y>(&'y mut self, timeout: u64) -> Result<&'y mut Self, vkraw::VkResult> {
+	pub fn wait<'y>(&'y mut self, timeout: Option<u64>) -> Result<&'y mut Self, vkraw::VkResult> {
 		let res;
 		unsafe {
-			res = vkraw::vkWaitForFences(self.device.device, 1, &self.fence, vkraw::VK_TRUE, std::u64::MAX);
+			res = vkraw::vkWaitForFences(self.device.device, 1, &self.fence, vkraw::VK_TRUE, timeout.unwrap_or(std::u64::MAX));
 		}
 		if res == vkraw::VkResult::VK_SUCCESS {
 			Ok(self)

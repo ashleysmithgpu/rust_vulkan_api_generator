@@ -19,7 +19,7 @@ num-derive = "0.2"
 num-traits = "0.2"
 
 [target."cfg(windows)".dependencies]
-vkraw = { path = "../vkraw", version = "0.0.1", features = ["VK_KHR_win32_surface", "VK_KHR_get_surface_capabilities2", "VK_EXT_swapchain_colorspace", "VK_EXT_full_screen_exclusive"] }
+vkraw = { path = "../vkraw", version = "0.0.1", features = ["VK_KHR_win32_surface", "VK_KHR_get_surface_capabilities2", "VK_EXT_swapchain_colorspace", "VK_EXT_full_screen_exclusive", "VK_KHR_shader_float16_int8"] }
 winapi = { version = "0.3.6", features = ["winuser", "libloaderapi", "shellscalingapi"] }
 
 # Enable after issue fixed: https://github.com/rust-lang/cargo/issues/2524
