@@ -336,37 +336,40 @@ fn main() {
 				while winapi::um::winuser::PeekMessageW(&mut message as *mut winapi::um::winuser::MSG, ptr::null_mut(), 0, 0, winapi::um::winuser::PM_REMOVE) > 0 {
 					winapi::um::winuser::TranslateMessage(&message as *const winapi::um::winuser::MSG);
 					winapi::um::winuser::DispatchMessageW(&message as *const winapi::um::winuser::MSG);
-					match message.message {
-						winapi::um::winuser::WM_QUIT => {
-							println!("WM_QUIT");
-							quit = true;
-							break;
-						},
-						winapi::um::winuser::WM_KEYDOWN => {
-							println!("WM_KEYDOWN {}", message.wParam);
-							if message.wParam == 32 {
-							} else if message.wParam == 82 {
-								rotate = true;
-							} else {
+					// Windows keeps the key up event from launching the application, so ingore the first frame
+					if frame_index > 0 {
+						match message.message {
+							winapi::um::winuser::WM_QUIT => {
+								println!("WM_QUIT");
 								quit = true;
+								break;
+							},
+							winapi::um::winuser::WM_KEYDOWN => {
+								println!("WM_KEYDOWN {}", message.wParam);
+								if message.wParam == 32 {
+								} else if message.wParam == 82 {
+									rotate = true;
+								} else {
+									quit = true;
+								}
+								break;
+							},
+							winapi::um::winuser::WM_KEYUP => {
+								println!("WM_KEYUP {}", message.wParam);
+								if message.wParam == 82 {
+									rotate = false;
+								} else if message.wParam == 32 {
+									hdr = !hdr;
+									recreate_swapchain = true;
+								} else {
+									quit = true;
+								}
+								break;
+							},
+							_ => {
 							}
-							break;
-						},
-						winapi::um::winuser::WM_KEYUP => {
-							println!("WM_KEYUP");
-							if message.wParam == 82 {
-								rotate = false;
-							} else if message.wParam == 32 {
-								hdr = !hdr;
-								recreate_swapchain = true;
-							} else {
-								quit = true;
-							}
-							break;
-						},
-						_ => {
-						}
-					};
+						};
+					}
 				}
 
 				if winapi::um::winuser::IsIconic(wsi_info.1) > 0 {

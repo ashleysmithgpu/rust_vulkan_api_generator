@@ -18,8 +18,9 @@ VK_KHR_win32_surface = []
 VK_KHR_get_surface_capabilities2 = []
 VK_EXT_swapchain_colorspace = []
 VK_EXT_full_screen_exclusive = []
+VK_KHR_shader_float16_int8 = []
 
-default = ["VK_KHR_surface", "VK_KHR_swapchain", "VK_KHR_display", "VK_KHR_display_swapchain", "VK_EXT_debug_report"]
+default = ["VK_KHR_surface", "VK_KHR_swapchain", "VK_KHR_display", "VK_KHR_display_swapchain", "VK_EXT_debug_report", "VK_KHR_shader_float16_int8"]
 
 [dependencies]
 libc = "0.2.24"
