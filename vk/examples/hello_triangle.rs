@@ -9,7 +9,7 @@ use std::ptr;
 fn main() {
 
 	let args: Vec<String> = std::env::args().collect();
-	
+
 	let mut hdr = args.iter().find(|&x| x == "hdr").is_some();
 	let mut fullscreen = args.iter().find(|&x| x == "fullscreen").is_some();
 
@@ -25,7 +25,7 @@ fn main() {
 	let wsi_info = instance.create_wsi(width, height, fullscreen);
 
 	#[cfg(feature = "xcb")]
-	let (protocols, wm_delete_window, wm_protocols) = {
+	let (wm_delete_window, wm_protocols) = {
 		let (wm_protocols, wm_delete_window) = {
 			let pc = xcb::intern_atom(&wsi_info.1, false, "WM_PROTOCOLS");
 			let dwc = xcb::intern_atom(&wsi_info.1, false, "WM_DELETE_WINDOW");
@@ -41,11 +41,11 @@ fn main() {
 			(p, dw)
 		};
 
-		xcb::change_property(&wsi_info.1, xcb::PROP_MODE_REPLACE as u8, wsi_info.2, wm_protocols, xcb::ATOM_ATOM, 32, &protocols);
-		
-		([wm_delete_window], wm_delete_window, wm_protocols)
+		xcb::change_property(&wsi_info.1, xcb::PROP_MODE_REPLACE as u8, wsi_info.2, wm_protocols, xcb::ATOM_ATOM, 32, &[wm_delete_window]);
+
+		(wm_delete_window, wm_protocols)
 	};
-	
+
 	let device: vk::Device;
 
 	let (physical_device, graphics_queue, compute_queue, transfer_queue) = {
@@ -60,23 +60,23 @@ fn main() {
 		let graphics_queue = device.get_queue(db.queue_create_infos[0].0, 0).unwrap();
 		let compute_queue = device.get_queue(db.queue_create_infos[0].0, 0).unwrap();
 		let transfer_queue = device.get_queue(db.queue_create_infos[0].0, 0).unwrap();
-		
+
 		(physical_device, graphics_queue, compute_queue, transfer_queue)
 	};
-	
+
 	let caps = physical_device.surface_capabilities(&wsi_info.0).unwrap();
 	width = std::cmp::max(width, caps.minImageExtent.width);
 	height = std::cmp::max(height, caps.minImageExtent.height);
 	width = std::cmp::min(width, caps.maxImageExtent.width);
 	height = std::cmp::min(height, caps.maxImageExtent.height);
-	
+
 	println!("Capping window size to {}x{}", width, height);
 
 	let heaps = physical_device.memory_properties();
 	let mem = vk::MemoryAllocator::new(&device);
 
 	let modes = physical_device.present_modes(&wsi_info.0).unwrap();
-	
+
 	let present_complete_sem = device.create_semaphore().unwrap();
 	let render_complete_sem = device.create_semaphore().unwrap();
 
@@ -193,17 +193,17 @@ fn main() {
 			offset: 0,
 			range: std::mem::size_of::<UniformBufferData>() as u64,
 		}, 0, 0, vkraw::VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-	
+
 	let command_pool = device.create_command_pool().unwrap();
 
 	let mut quit = false;
-	
+
 	let mut swapchain = None;
 
 	'swapchain_setup: while !quit {
 
 		let formats = physical_device.supported_surface_formats2(hdr, &wsi_info).unwrap();
-		
+
 		let format;
 		let colour_space;
 
@@ -227,7 +227,7 @@ fn main() {
 			sb.present_mode = modes[0];
 			sb.create(&swapchain).unwrap()
 		});
-		
+
 		let swapchain = swapchain.as_ref().unwrap();
 
 		let mut fences = vec![
@@ -301,6 +301,10 @@ fn main() {
 								println!("Key {} pressed", key_press.detail());
 								if key_press.detail() == 27 {
 									rotate = true;
+								} else if key_press.detail() == 24 {
+									quit = true;
+								} else if key_press.detail() == 9 {
+									quit = true;
 								}
 							},
 							xcb::KEY_RELEASE => {
@@ -432,7 +436,7 @@ fn main() {
 				{
 					let mut mapped = uniform_memory[current_buffer as usize].map::<UniformBufferData>();
 					unsafe {
-						libc::memcpy(mapped.get_ptr() as *mut core::ffi::c_void, (&mut ub_data as *mut UniformBufferData) as *mut libc::c_void, std::mem::size_of::<UniformBufferData>() as libc::size_t);
+						libc::memcpy(mapped.get_ptr() as *mut libc::c_void, (&mut ub_data as *mut UniformBufferData) as *mut libc::c_void, std::mem::size_of::<UniformBufferData>() as libc::size_t);
 					}
 				}
 			}

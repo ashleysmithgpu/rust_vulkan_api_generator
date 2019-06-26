@@ -386,7 +386,6 @@ if require_feature != "VK_VERSION_1_1" {
 										bitflags.last_mut().unwrap().values.push((name, BitflagsValueType::Value(value)));
 									}
 								} else {
-								println!("{}", reader.buffer_position());
 									// TODO: Some enums have no value VK_COLORSPACE_SRGB_NONLINEAR_KHR
 									if !attributes.get("alias").is_some() {
 										if value.find('x').is_some() {

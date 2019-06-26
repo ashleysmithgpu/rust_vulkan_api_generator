@@ -376,7 +376,7 @@ impl Instance {
 	}
 
 	#[cfg(unix)]
-	pub fn create_wsi(&self, width: u32, height: u32) -> (Surface, xcb::Connection, u32) {
+	pub fn create_wsi(&self, width: u32, height: u32, fullscreen: bool) -> (Surface, xcb::Connection, u32) {
 
 		assert!(width <= std::u16::MAX as u32);
 		assert!(height <= std::u16::MAX as u32);
@@ -403,6 +403,26 @@ impl Instance {
 					(xcb::CW_EVENT_MASK, xcb::EVENT_MASK_EXPOSURE | xcb::EVENT_MASK_KEY_PRESS | xcb::EVENT_MASK_KEY_RELEASE),
 				]
 			);
+
+			if fullscreen {
+				let atom_wm_state = xcb::intern_atom(&conn, false, "_NET_WM_STATE");
+				let atom_wm_fullscreen = xcb::intern_atom(&conn, false, "_NET_WM_STATE_FULLSCREEN");
+				let s = match atom_wm_state.get_reply() {
+					Ok(s) => s.atom(),
+					Err(_) => panic!("could not load _NET_WM_STATE atom")
+				};
+				let sfs = match atom_wm_fullscreen.get_reply() {
+					Ok(sfs) => sfs.atom(),
+					Err(_) => panic!("could not load _NET_WM_STATE_FULLSCREEN atom")
+				};
+				let protocols = [sfs];
+				xcb::change_property(&conn,
+					xcb::PROP_MODE_REPLACE as u8,
+					win, s,
+					xcb::ATOM_ATOM, 32,
+					&protocols);
+			}
+
 			xcb::map_window(&conn, win);
 			conn.flush();
 
@@ -431,7 +451,7 @@ impl Instance {
 		unsafe {
 
 			winapi::um::shellscalingapi::SetProcessDpiAwareness(winapi::um::shellscalingapi::PROCESS_SYSTEM_DPI_AWARE);
-		
+
 			let name = win32_string("windoze");
 			println!("Creating WIN32 window");
 			hinstance = winapi::um::libloaderapi::GetModuleHandleW(std::ptr::null_mut());
@@ -491,10 +511,10 @@ impl Instance {
 			if fullscreen {
 				let style = /*winapi::shared::basetsd::LONG_PTR:*/ winapi::um::winuser::GetWindowLongPtrA(handle, winapi::um::winuser::GWL_STYLE);
 				let exstyle = /*winapi::shared::basetsd::LONG_PTR:*/ winapi::um::winuser::GetWindowLongPtrA(handle, winapi::um::winuser::GWL_EXSTYLE);
-				
+
 				winapi::um::winuser::SetWindowLongPtrA(handle, winapi::um::winuser::GWL_STYLE, style & (!(winapi::um::winuser::WS_CAPTION | winapi::um::winuser::WS_THICKFRAME) as isize));
 				winapi::um::winuser::SetWindowLongPtrA(handle, winapi::um::winuser::GWL_EXSTYLE, exstyle & (!(winapi::um::winuser::WS_EX_DLGMODALFRAME | winapi::um::winuser::WS_EX_WINDOWEDGE | winapi::um::winuser::WS_EX_CLIENTEDGE | winapi::um::winuser::WS_EX_STATICEDGE) as isize));
-				
+
 				let mut monitor_info: winapi::um::winuser::MONITORINFO;
 				monitor_info = std::mem::uninitialized();
 				monitor_info.cbSize = std::mem::size_of::<winapi::um::winuser::MONITORINFO>() as u32;
@@ -595,7 +615,7 @@ impl<'a> PhysicalDevice<'a> {
 			pNext: if hdr { unsafe { mem::transmute(&fullscreen_info) } } else { ptr::null_mut() },
 			surface: wsi_info.0.surface
 		};
-	
+
 		// Get a supported colour format and colour space
 		let mut format_count = 0;
 		assert!(self.instance.vk.GetPhysicalDeviceSurfaceFormats2KHR.is_some());
@@ -900,7 +920,7 @@ impl<'a> DeviceBuilder<'a> {
 			shaderFloat16: 1,
 			shaderInt8: 1
 		};
-		
+
 		let device_create_info = vkraw::VkDeviceCreateInfo {
 			sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
 			pNext: if true { unsafe { mem::transmute(&extra_features) } } else { ptr::null_mut() },
@@ -1192,7 +1212,159 @@ impl<'a> Device<'a> {
 		}
 	}
 
-	/*pub fn load_ktx_texture_to_gpu<'y>(&'a self, mem: &'y mut MemoryAllocator<'a>, filename: String, staging_memory_index: usize, gpu_only_memory_index: usize, queue: &Queue, command_pool: &CommandPool) -> Option<(Image<'a>, ImageView<'a>, Mem<'y>, KtxFile)> {
+	pub fn load_ktx_texture_to_cpu_mem<'y>(&'a self, filename: String) -> Option<(KtxFile)> {
+
+		let f = std::fs::File::open(&filename);
+		if f.is_ok() {
+			match KtxFile::deserialize(&mut f.unwrap()) {
+				Ok(ktx_file) => {
+					println!("ktx file\n{:?}", ktx_file);
+					return Some(ktx_file)
+				}
+				Err(_e) => return None
+			}
+		}
+		None
+	}
+
+	pub fn load_ktx_texture_create_img<'y>(&'a self, ktx_file: &KtxFile) -> Option<(Image<'a>)> {
+
+		println!("Creating GPU image");
+		let image = {
+			let mut ib = ImageBuilder::new(&self);
+			ib.extent.width = ktx_file.header.pixel_width as u32;
+			ib.extent.height = ktx_file.header.pixel_height as u32;
+			ib.format = ktx_file.header.get_vk_format().unwrap();
+			ib.tiling = vkraw::VkImageTiling::VK_IMAGE_TILING_OPTIMAL;
+			ib.usage = vkraw::VkImageUsageFlags::VK_IMAGE_USAGE_TRANSFER_DST_BIT | vkraw::VkImageUsageFlags::VK_IMAGE_USAGE_STORAGE_BIT;
+			ib.create()
+		};
+
+		if image.is_ok() {
+			Some(image.unwrap())
+		} else {
+			None
+		}
+	}
+
+	pub fn load_ktx_texture_create_mem<'y>(&'a self, mem: &'y MemoryAllocator<'a>, image: &Image<'a>, gpu_only_memory_index: usize) -> Option<(Mem<'y>)> {
+
+		let mem = mem.allocate_image_memory(&image, gpu_only_memory_index);
+
+		if mem.is_ok() {
+			Some(mem.unwrap())
+		} else {
+			None
+		}
+	}
+
+	pub fn load_ktx_texture_upload_blocking<'y>(&'a self, ktx_file: &KtxFile, image: &Image<'a>, mem: &'y MemoryAllocator<'a>, staging_memory_index: usize, queue: &Queue, command_pool: &CommandPool) -> bool {
+
+		let img_size = ktx_file.header.image_size_max();
+
+		println!("Creating memory");
+		let staging_buffer = self.create_buffer(img_size, vkraw::VkBufferUsageFlags::VK_BUFFER_USAGE_TRANSFER_SRC_BIT).unwrap();
+		let staging_buffer_size = mem.get_buffer_memory_size_req(&staging_buffer);
+		let mut staging_buffer_mem = mem.allocate_buffer_memory(&staging_buffer, staging_memory_index).unwrap();
+		assert!(staging_buffer_size >= img_size as u64);
+
+		println!("Coyping {}", img_size);
+		{
+			let mut mapped = staging_buffer_mem.map_raw(img_size);
+			unsafe {
+				libc::memcpy(mapped.get_ptr() as *mut libc::c_void, ktx_file.data.as_ref().unwrap()[0].data.as_ptr() as *mut libc::c_void, img_size as libc::size_t);
+			}
+		}
+		let mut buffer_copy_regions = Vec::<vkraw::VkBufferImageCopy>::new();
+
+		assert!(ktx_file.header.number_of_mipmap_levels == 1);
+		//for mip in mips { // TODO
+		{
+			buffer_copy_regions.push(vkraw::VkBufferImageCopy {
+				bufferOffset: 0,
+				bufferRowLength: 0,
+				bufferImageHeight: 0,
+				imageSubresource: vkraw::VkImageSubresourceLayers {
+					aspectMask: vkraw::VkImageAspectFlags::VK_IMAGE_ASPECT_COLOR_BIT,
+					mipLevel: 0,
+					baseArrayLayer: 0,
+					layerCount: 1,
+				},
+				imageOffset: vkraw::VkOffset3D { x: 0, y: 0, z: 0 },
+				imageExtent: vkraw::VkExtent3D { width: ktx_file.header.pixel_width as u32, height: ktx_file.header.pixel_height as u32, depth: 1 },
+			});
+		}
+		{
+			println!("Creating cmdb");
+			let mut upload_cmdbs = command_pool.create_command_buffers(1).unwrap();
+			let upload_cmdb = &mut upload_cmdbs[0];
+			upload_cmdb
+				.begin().unwrap()
+
+				.pipeline_barrier(vkraw::VkPipelineStageFlagBits::VK_PIPELINE_STAGE_HOST_BIT, vkraw::VkPipelineStageFlagBits::VK_PIPELINE_STAGE_TRANSFER_BIT, vkraw::VkDependencyFlagBits::_EMPTY,
+					vec![], vec![], vec![vkraw::VkImageMemoryBarrier {
+						sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+						pNext: ptr::null(),
+						srcAccessMask: vkraw::VkAccessFlags::_EMPTY,
+						dstAccessMask: vkraw::VkAccessFlags::VK_ACCESS_TRANSFER_WRITE_BIT,
+						oldLayout: vkraw::VkImageLayout::VK_IMAGE_LAYOUT_UNDEFINED,
+						newLayout: vkraw::VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+						srcQueueFamilyIndex: 0,
+						dstQueueFamilyIndex: 0,
+						image: image.image,
+						subresourceRange: vkraw::VkImageSubresourceRange {
+							aspectMask: vkraw::VkImageAspectFlags::VK_IMAGE_ASPECT_COLOR_BIT,
+							baseMipLevel: 0,
+							levelCount: 1,
+							baseArrayLayer: 0,
+							layerCount: 1
+						}
+					}])
+				.copy_buffer_to_image(&staging_buffer, &image, vkraw::VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, buffer_copy_regions)
+				.pipeline_barrier(vkraw::VkPipelineStageFlagBits::VK_PIPELINE_STAGE_TRANSFER_BIT, vkraw::VkPipelineStageFlagBits::VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, vkraw::VkDependencyFlagBits::_EMPTY,
+					vec![], vec![], vec![vkraw::VkImageMemoryBarrier {
+						sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+						pNext: ptr::null(),
+						srcAccessMask: vkraw::VkAccessFlags::VK_ACCESS_TRANSFER_WRITE_BIT,
+						dstAccessMask: vkraw::VkAccessFlags::VK_ACCESS_SHADER_READ_BIT,
+						oldLayout: vkraw::VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+						newLayout: vkraw::VkImageLayout::VK_IMAGE_LAYOUT_GENERAL,
+						srcQueueFamilyIndex: 0,
+						dstQueueFamilyIndex: 0,
+						image: image.image,
+						subresourceRange: vkraw::VkImageSubresourceRange {
+							aspectMask: vkraw::VkImageAspectFlags::VK_IMAGE_ASPECT_COLOR_BIT,
+							baseMipLevel: 0,
+							levelCount: 1,
+							baseArrayLayer: 0,
+							layerCount: 1
+						}
+					}])
+				.end_command_buffer();
+
+			println!("Submitting cmdb");
+			let mut temp_fence = self.create_fence().unwrap();
+			queue.submit(vec![&upload_cmdb], Some(&temp_fence), vec![], vec![]);
+			println!("Waiting for results");
+			temp_fence.wait(None).unwrap();
+			println!("Done");
+		}
+
+		true
+	}
+
+	pub fn load_ktx_texture_create_image_view<'y>(&'a self, ktx_file: &KtxFile, image: &'a Image<'a>) -> Option<ImageView<'a>> {
+
+		let image_view = ImageViewBuilder::new(&image, ktx_file.header.get_vk_format().unwrap()).create();
+
+		if image_view.is_ok() {
+			Some(image_view.unwrap())
+		} else {
+			None
+		}
+	}
+
+/*	pub fn load_ktx_texture_to_gpu<'y>(&'a self, mem: &'y mut MemoryAllocator<'a>, filename: String, staging_memory_index: usize, gpu_only_memory_index: usize, queue: &Queue, command_pool: &CommandPool) -> Option<(Image<'a>, ImageView<'a>, Mem<'y>, KtxFile)> {
 
 		let mut f = std::fs::File::open(&filename).unwrap();
 		let ktx_file = KtxFile::deserialize(&mut f).unwrap();
@@ -1212,7 +1384,7 @@ impl<'a> Device<'a> {
 		{
 			let mut mapped = staging_buffer_mem.map_raw(img_size);
 			unsafe {
-				libc::memcpy(mapped.get_ptr() as *mut core::ffi::c_void, ktx_file.data.as_ref().unwrap()[0].data.as_ptr() as *mut libc::c_void, img_size as libc::size_t);
+				libc::memcpy(mapped.get_ptr() as *mut libc::c_void, ktx_file.data.as_ref().unwrap()[0].data.as_ptr() as *mut libc::c_void, img_size as libc::size_t);
 			}
 		}
 
@@ -1259,7 +1431,7 @@ impl<'a> Device<'a> {
 			let upload_cmdb = &mut upload_cmdbs[0];
 			upload_cmdb
 				.begin().unwrap()
-				
+
 				.pipeline_barrier(vkraw::VkPipelineStageFlagBits::VK_PIPELINE_STAGE_HOST_BIT, vkraw::VkPipelineStageFlagBits::VK_PIPELINE_STAGE_TRANSFER_BIT, vkraw::VkDependencyFlagBits::_EMPTY,
 					vec![], vec![], vec![vkraw::VkImageMemoryBarrier {
 						sType: vkraw::VkStructureType::VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -1308,7 +1480,7 @@ impl<'a> Device<'a> {
 			temp_fence.wait(None).unwrap();
 			println!("Done");
 		}
-		
+
 		Some((cs_input_image, cs_image_view, cs_image_mem, ktx_file))
 	}*/
 }
